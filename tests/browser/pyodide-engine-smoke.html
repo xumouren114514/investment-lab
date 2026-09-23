@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>投资研究室 · Pyodide 引擎冒烟验证</title>
+  <style>
+    body { max-width: 54rem; margin: 3rem auto; padding: 0 1.25rem; font: 16px/1.6 system-ui, sans-serif; color: #17243a; }
+    button { padding: .6rem 1rem; font: inherit; }
+    pre { padding: 1rem; overflow-wrap: anywhere; white-space: pre-wrap; background: #f1f5fa; border-radius: .5rem; }
+  </style>
+</head>
+<body>
+  <h1>浏览器内回测引擎冒烟验证</h1>
+  <p>加载本地引擎源码，在隔离 Web Worker 内用 Pyodide 执行五日合成 VWAP 回测，并与 Python 参考结果哈希比较。</p>
+  <button id="run">运行验证</button>
+  <pre id="result" role="status" aria-live="polite">尚未运行</pre>
+  <script type="module" src="./pyodide-engine-smoke.js"></script>
+</body>
+</html>

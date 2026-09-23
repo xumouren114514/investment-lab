@@ -1,0 +1,7 @@
+{
+  "snapshot": "替换为本机实际数据快照ID",
+  "strategy": "buy_hold",
+  "kind": "single",
+  "params": {"weight": "0.95"},
+  "config": {"symbols": ["DEMO.A"], "start": "2023-01-02", "end": "2025-12-31", "initial_cash": "100000", "mode": "strict_vwap", "benchmark": "DEMO.ETF"}
+}

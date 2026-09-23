@@ -1,0 +1,158 @@
+{
+  "reviewed": "2026-09-20",
+  "scope": "代码开源性与行情使用权分别记录；本机个人研究，不再分发原始行情",
+  "resources": [
+    {
+      "name": "BaoStock",
+      "url": "https://www.baostock.com/mainContent?file=home.md",
+      "code_license": "BSD",
+      "use": "A股未复权日线、明确停牌、IPO资料、分红支付日",
+      "status": "已接入并匿名实测",
+      "limits": "单位和字段已核对；交易范围/配股完整性尚待验证"
+    },
+    {
+      "name": "AKShare",
+      "url": "https://github.com/akfamily/akshare",
+      "code_license": "MIT",
+      "use": "发现与交叉核对A/H/US股票、ETF和期货接口",
+      "status": "已审阅源码；隔离环境安装1.18.96",
+      "limits": "生产适配器使用轻量直接接口；开源许可不等于底层行情许可"
+    },
+    {
+      "name": "东方财富公开行情",
+      "url": "https://akshare.akfamily.xyz/data/stock/stock.html",
+      "code_license": null,
+      "use": "A/H/US行情和成交额；无需账号",
+      "status": "已接入；实际数据保留",
+      "limits": "手数舍入、早期坏行、限速和统计范围不明；均价仅候选"
+    },
+    {
+      "name": "Yahoo / yfinance",
+      "url": "https://github.com/ranaroussi/yfinance",
+      "code_license": "Apache-2.0",
+      "use": "美股、港股及指数参考行情、split/dividend事件",
+      "status": "Chart适配器已接入并实测",
+      "limits": "历史OHLC已做拆股调整，缺少VWAP/支付日；证券参考序列禁止执行回测"
+    },
+    {
+      "name": "中金所日统计",
+      "url": "http://www.cffex.com.cn/rtj/",
+      "code_license": null,
+      "use": "真实IF/IH/IC/IM月份合约、结算价、单边量额",
+      "status": "已接入并验证量纲",
+      "limits": "不是连续合约；挂牌/到期/历史保证金仍未完整绑定"
+    },
+    {
+      "name": "港交所每日行情表",
+      "url": "https://www.hkex.com.hk/eng/stat/smstat/dayquot/d260918e.htm",
+      "code_license": null,
+      "use": "港股成交额与成交股数独立核对",
+      "status": "已下载2026-09-18官方报告",
+      "limits": "历史公开保存期限有限；不能用它承诺1980至今"
+    },
+    {
+      "name": "Alpaca / alpaca-py",
+      "url": "https://docs.alpaca.markets/us/docs/market-data-faq",
+      "code_license": "SDK: Apache-2.0",
+      "use": "2016起美股历史SIP、VWAP字段",
+      "status": "官方文档确认；未登录实测",
+      "limits": "需免费账号/密钥；end至少滞后15分钟可查SIP；不覆盖1980；交易过滤口径待核实"
+    },
+    {
+      "name": "exchange_calendars",
+      "url": "https://github.com/gerrymanoim/exchange_calendars",
+      "code_license": "Apache-2.0",
+      "use": "XNYS/XHKG/XSHG交易日历",
+      "status": "平台已使用固定版本",
+      "limits": "历史特殊休市须与原始供应商日历对照；不能把缺数据当休市"
+    },
+    {
+      "name": "FinanceDatabase",
+      "url": "https://github.com/JerBouma/FinanceDatabase",
+      "code_license": "MIT",
+      "use": "跨市场证券代码与分类候选",
+      "status": "已审阅；作为映射参考",
+      "limits": "没有完整交易行情和历史公司行动；当前列表可能含生存者偏差"
+    },
+    {
+      "name": "Qlib",
+      "url": "https://github.com/microsoft/qlib",
+      "code_license": "MIT",
+      "use": "研究流程、时间切分、模型实验参考",
+      "status": "已评估；暂不作为核心依赖",
+      "limits": "示例数据并不自动满足未复权量额/动作账本；避免重复引入重型框架"
+    },
+    {
+      "name": "Zipline Reloaded",
+      "url": "https://github.com/stefan-jansen/zipline-reloaded",
+      "code_license": "Apache-2.0",
+      "use": "事件驱动研究、bundle/公司行动处理参考",
+      "status": "已评估；保留现有账本",
+      "limits": "不能提供缺失的三市场VWAP；替换引擎需重新验收"
+    },
+    {
+      "name": "Backtrader",
+      "url": "https://github.com/mementum/backtrader",
+      "code_license": "GPL-3.0",
+      "use": "执行与期货现金调整对照参考",
+      "status": "已评估；未拷贝实现",
+      "limits": "源码复用须遵守GPL；默认成交模型不能直接替代本项目要求"
+    },
+    {
+      "name": "VeighNa / vn.py",
+      "url": "https://github.com/vnpy/vnpy",
+      "code_license": "MIT",
+      "use": "月份期货、合约和交易规则架构参考",
+      "status": "已评估；未接交易网关",
+      "limits": "框架不附带免费完整历史行情；个人研究平台暂不引入实盘模块"
+    },
+    {
+      "name": "TqSdk",
+      "url": "https://github.com/shinnytech/tqsdk-python",
+      "code_license": "Apache-2.0",
+      "use": "国内期货合约元数据与行情候选",
+      "status": "已评估；账号服务未实测",
+      "limits": "开源SDK与服务权限分别管理；不能假设专业历史数据免费"
+    },
+    {
+      "name": "Empyrical",
+      "url": "https://github.com/quantopian/empyrical",
+      "code_license": "Apache-2.0",
+      "use": "绩效统计公式与对照样例",
+      "status": "已评估；现有收益模块保留",
+      "limits": "不能代替资金流账本和数据清洗；旧依赖兼容性需检查"
+    },
+    {
+      "name": "FRED SOFR",
+      "url": "https://fred.stlouisfed.org/series/SOFR",
+      "code_license": null,
+      "use": "公开融资参考利率候选",
+      "status": "官方来源已核对",
+      "limits": "基准利率不等于券商实际融资利率；历史修订与可用时刻需另审"
+    },
+    {
+      "name": "ProShares",
+      "url": "https://www.proshares.com/our-etfs/leveraged-and-inverse/tqqq",
+      "code_license": null,
+      "use": "正向杠杆ETF的真实成立时间和每日杠杆目标",
+      "status": "TQQQ产品页核对；真实行情样本已探测",
+      "limits": "不能把指数日收益机械乘3补成立前历史；分拆/分红仍需单独记账"
+    },
+    {
+      "name": "HKEX HSI合约规格",
+      "url": "https://www.hkex.com.hk/Products/Listed-Derivatives/Equity-Index/Hang-Seng-Index-(HSI)/Hang-Seng-Index-Futures?sc_lang=en",
+      "code_license": null,
+      "use": "恒指期货乘数、时段、到期规则",
+      "status": "官方规则已核对",
+      "limits": "当前规则不能倒填所有历史；夜盘归属与历史保证金未完成"
+    },
+    {
+      "name": "CME ES合约规格",
+      "url": "https://www.cmegroup.com/markets/equities/sp/e-mini-sandp500.contractSpecs.html",
+      "code_license": null,
+      "use": "美国指数期货合约字段",
+      "status": "官方来源已核对",
+      "limits": "规格公开不等于历史逐月行情免费；仍缺完整历史数据与保证金"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+# Generic starter configuration. Add only instruments and provider mappings
+# that you have reviewed; a mapping marked false is not verified for trading.
+version: 1
+selection_date: null
+bias: "请记录标的池的选择日期；当前池可能包含事后选股偏差"
+instruments: []

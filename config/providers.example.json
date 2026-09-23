@@ -1,0 +1,13 @@
+{
+  "full_revision_audit": false,
+  "targets": [
+    {
+      "dataset": "贵州茅台-Tushare待核实",
+      "provider": "tushare",
+      "symbol": "600519.SH",
+      "start": "2001-08-27",
+      "security": {"name": "贵州茅台", "market": "CN", "currency": "CNY", "exchange": "XSHG", "timezone": "Asia/Shanghai", "kind": "stock", "lot": 100, "sell_delay": 1, "listed": "2001-08-27", "listing_verified": false, "actions_verified": false, "margin_eligible": false},
+      "adapter_options": {"api": "daily", "scope_verified": false, "scope_evidence": null}
+    }
+  ]
+}

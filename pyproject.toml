@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "investment-lab"
+version = "0.2.3"
+description = "本机投资策略研究与可复现回测"
+requires-python = ">=3.12,<3.13"
+dependencies = ["fastapi", "uvicorn", "pandas", "numpy", "PyYAML", "exchange-calendars", "tzdata", "psutil"]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+open-data = ["baostock==0.9.3"]
+
+[project.scripts]
+investment-lab = "investment_lab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+investment_lab = ["web/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
