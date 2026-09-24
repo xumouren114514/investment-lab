@@ -268,8 +268,8 @@ def create_app(root=None):
 
     @app.get("/api/strategies")
     def strategies():
-        from investment_lab.strategies.examples import NAMES
-        return {"builtins": NAMES, "custom": [p.relative_to(store.root / "user_strategies").as_posix() for p in (store.root / "user_strategies").rglob("*.py")]}
+        from investment_lab.strategies.examples import CATALOG, NAMES
+        return {"builtins": NAMES, "catalog": CATALOG, "custom": [p.relative_to(store.root / "user_strategies").as_posix() for p in (store.root / "user_strategies").rglob("*.py")]}
 
     @app.get("/api/strategy")
     def strategy_file(name: str):

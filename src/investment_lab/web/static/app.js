@@ -3,6 +3,7 @@ const esc = (s) => String(s ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 const pct = (x) => x == null ? '—' : (x * 100).toFixed(2) + '%';
 const num = (x) => x == null ? '—' : Number(x).toLocaleString('zh-CN',{maximumFractionDigits:2});
 let datasets = [], instruments = [], currentRun = null, currentSample = 0, currentSection = 'holdout', tableOffset = 0, tableName = 'trades';
+let strategyCatalog = [], strategyParamsById = {}, activeStrategyId = '';
 let polling = null, pollingRun = null, detailRequest = 0, pollInFlight = false;
 let selectedSnapshotIds = [];
 let supportsMultiSnapshot = false;
@@ -75,7 +76,7 @@ function setDatasets(){
   if(selected.every(d=>d.source?.provider==='Yahoo/chart')&&Object.values(securities).some(s=>s.kind!=='index'))$('mode').value='reference_research';
   else if($('mode').value==='reference_research')$('mode').value='strict_vwap';
  }else $('dataset-range').textContent='';
- updatePriceModeNote();updateStrategyScopeNote();
+ updatePriceModeNote();updateStrategyScopeNote();renderStrategyParameters(false);refreshConfigValidity();
 }
 $('dataset-options').onchange=e=>{
  const box=e.target;if(!box.matches('input[name="snapshots"]'))return;
@@ -90,41 +91,87 @@ $('dataset-selected').onclick=e=>{
  const id=button.dataset.removeSnapshot;selectedSnapshotIds=selectedSnapshotIds.filter(s=>s!==id);
  document.querySelectorAll('#dataset-options input').forEach(b=>{if(b.value===id)b.checked=false;});setDatasets();
 };
+function strategyEntry(id=$('strategy').value){return strategyCatalog.find(item=>item.id===id)||null;}
+function parseStrategyParams(){return InvestmentLabStrategyForms.parseObject($('params').value,'策略参数');}
+function selectedStrategySymbols(){return [...$('symbols').selectedOptions].map(option=>option.value);}
 function updateStrategyScopeNote(){
- const symbols=[...$('symbols').selectedOptions],strategy=$('strategy').value;
- const single=['buy_hold','dca','moving_average','drawdown_buy','leverage_rebalance'].includes(strategy);
- $('strategy-scope-note').textContent=symbols.length>1&&single?`此内置策略只交易第一项：${symbols[0].textContent}。多标的交易可选“同市场轮动”或使用 Python 策略；勾选数据不会自动分配仓位。`:'所选标的共用同一账户和初始资金，实际买卖由策略决定。';
+ const symbols=[...$('symbols').selectedOptions],entry=strategyEntry();
+ const single=entry?.scope==='single';
+ $('strategy-scope-note').textContent=symbols.length>1&&single?`此预设只交易第一项：${symbols[0].textContent}。需要多标的策略时，请选择组合策略。`:'所选标的共用同一账户和初始资金，实际买卖由策略决定。';
 }
-const strategyGuideText={
- buy_hold:'买入持有：首次满足数据与成交条件时建立目标仓位，之后持有。目标仓位等高级参数可在下方 JSON 中调整。',
- dca:'定期投入：每月首个交易日尝试按“每次买入金额”下单；每月自动入金是另一回事，只给账户补充现金。',
- monthly_equal_weight:'月度定投与动态等权：首次配置及月度检查时用可用现金优先补低配标的；可选择是否在权重偏离时卖出再平衡。',
- moving_average:'均线：比较已知收盘价与历史均线，达到条件后建立或退出目标仓位；窗口长度可在高级策略参数中调整。',
- drawdown_buy:'回撤买入：价格相对历史窗口高点跌到设定阈值时建立目标仓位；窗口和回撤阈值在高级策略参数中调整。',
- rotation:'同市场轮动：按历史动量在所选标的中选择领先者，每月检查；多标的会共用同一账户。',
- leverage_rebalance:'杠杆再平衡：每日尝试恢复目标杠杆，融资、费用及成交限制会影响结果；请谨慎检查假设。',
- futures_roll:'月份合约换月：按预先提供的固定日期安排换月，不会使用未来成交量挑选合约。',
- cash:'持有现金：不下买单，可用来核对资金流、区间和结果展示。',
-};
-function refreshGuidedInputs(){
- const strategy=$('strategy').value,errors=[];
- $('strategy-help').textContent=strategyGuideText[strategy]||'当前 Python 策略的说明与参数请查看策略文件；常用资金流输入仍可直接使用。';
- $('dca-amount-row').hidden=strategy!=='dca';$('equal-weight-mode-row').hidden=strategy!=='monthly_equal_weight';
- try{if(document.activeElement!==$('monthly-deposit-guide'))$('monthly-deposit-guide').value=InvestmentLabUI.readAmount($('flows').value,'monthly','资金流');$('monthly-deposit-guide').disabled=false;}
- catch(e){$('monthly-deposit-guide').disabled=true;errors.push(e.message);}
- try{if(document.activeElement!==$('dca-amount-guide'))$('dca-amount-guide').value=InvestmentLabUI.readAmount($('params').value,'amount','策略参数')||'1000';if(document.activeElement!==$('equal-weight-mode-guide'))$('equal-weight-mode-guide').value=InvestmentLabUI.readChoice($('params').value,'portfolio_mode','rebalance',['rebalance','no_rebalance'],'策略参数');$('dca-amount-guide').disabled=false;$('equal-weight-mode-guide').disabled=false;}
- catch(e){$('dca-amount-guide').disabled=true;$('equal-weight-mode-guide').disabled=true;errors.push(e.message);}
- $('guide-status').textContent=errors.length?`${errors.join(' ')} 请展开高级设置修正 JSON。`:'常用输入会同步写入参数并保留其他内容；特殊日期仍可在高级 JSON 中填写。';
- $('guide-status').classList.toggle('guide-error',errors.length>0);
+function renderStrategyParameters(changed=true){
+ const id=$('strategy').value,priorId=activeStrategyId;
+ let prior={};try{prior=parseStrategyParams();}catch(_){/* Preserve malformed JSON for correction in advanced settings. */}
+ if(priorId)strategyParamsById[priorId]=prior;
+ let next;
+ if(id===priorId)next=prior;
+ else if(strategyParamsById[id])next=strategyParamsById[id];
+ else if(!priorId)next=prior;
+ else next=InvestmentLabStrategyForms.defaults(strategyEntry(id));
+ const entry=strategyEntry(id),selected=selectedStrategySymbols();
+ if(entry)for(const field of entry.parameters||[])if(field.type==='weights'){
+  const supplied=next[field.key]&&typeof next[field.key]==='object'&&!Array.isArray(next[field.key])?next[field.key]:{};
+  next[field.key]=Object.fromEntries(Object.entries(supplied).filter(([symbol])=>selected.includes(symbol)));
+ }
+ activeStrategyId=id;strategyParamsById[id]=next;
+ $('params').value=JSON.stringify(next,null,2);
+ InvestmentLabStrategyForms.render($('strategy-parameter-fields'),entry,next,selectedStrategySymbols());
+ $('strategy-count').textContent=`${strategyCatalog.length} 种预设`;
+ $('strategy-parameter-status').textContent=entry?'常用字段会同步到高级 JSON；未填参数使用表单默认值。':'';
+ $('strategy-parameter-status').classList.remove('run-error');
+ if(changed)saveConfigDraft();
 }
-function writeGuidedAmount(inputId,textareaId,key,label){try{$(textareaId).value=InvestmentLabUI.writeAmount($(textareaId).value,key,$(inputId).value,label);refreshGuidedInputs();saveConfigDraft();}catch(e){$('guide-status').textContent=e.message;$('guide-status').classList.add('guide-error');}}
-$('monthly-deposit-guide').oninput=()=>writeGuidedAmount('monthly-deposit-guide','flows','monthly','资金流');
-$('dca-amount-guide').oninput=()=>writeGuidedAmount('dca-amount-guide','params','amount','策略参数');
-$('monthly-deposit-guide').onblur=refreshGuidedInputs;$('dca-amount-guide').onblur=refreshGuidedInputs;
-$('equal-weight-mode-guide').onchange=()=>{try{$('params').value=InvestmentLabUI.writeChoice($('params').value,'portfolio_mode',$('equal-weight-mode-guide').value,['rebalance','no_rebalance'],'策略参数');refreshGuidedInputs();saveConfigDraft();}catch(e){$('guide-status').textContent=e.message;$('guide-status').classList.add('guide-error');}};
-$('flows').addEventListener('input',refreshGuidedInputs);$('params').addEventListener('input',refreshGuidedInputs);
-$('symbols').onchange=()=>{updateStrategyScopeNote();refreshConfigValidity();};
-$('strategy').onchange=()=>{updateStrategyScopeNote();refreshConfigValidity();refreshGuidedInputs();};
+function syncStrategyParameters(){
+ const entry=strategyEntry();let current;
+ try{current=parseStrategyParams();}catch(error){$('strategy-parameter-status').textContent=error.message;$('strategy-parameter-status').classList.add('run-error');refreshConfigValidity();return;}
+ const symbols=selectedStrategySymbols();
+ const rawError=InvestmentLabStrategyForms.validateValues(entry,{...InvestmentLabStrategyForms.defaults(entry),...current},symbols).error;
+ if(rawError){$('strategy-parameter-status').textContent=rawError;$('strategy-parameter-status').classList.add('run-error');refreshConfigValidity();return;}
+ const result=InvestmentLabStrategyForms.read($('strategy-parameter-fields'),entry,current,symbols);
+ $('strategy-parameter-status').textContent=result.error||'参数有效；可展开高级设置查看完整 JSON。';
+ $('strategy-parameter-status').classList.toggle('run-error',!!result.error);
+ if(!result.error){
+  $('params').value=JSON.stringify(result.value,null,2);
+  strategyParamsById[$('strategy').value]=result.value;
+  saveConfigDraft();
+ }
+ refreshConfigValidity();
+}
+function strategyParameterError(){
+ try{
+  const entry=strategyEntry(),raw=parseStrategyParams(),symbols=selectedStrategySymbols();
+  const rawError=InvestmentLabStrategyForms.validateValues(entry,{...InvestmentLabStrategyForms.defaults(entry),...raw},symbols).error;
+  return rawError||InvestmentLabStrategyForms.read($('strategy-parameter-fields'),entry,raw,symbols).error;
+ }
+ catch(error){return error.message;}
+}
+function syncMonthlyDeposit(){
+ const input=$('monthly-deposit');
+ try{
+  if(document.activeElement!==input)input.value=InvestmentLabUI.readAmount($('flows').value,'monthly','资金流');
+  $('funding-status').textContent='入金只增加现金，不会自动买入；定投金额在所选策略参数中单独设置。';
+  $('funding-status').classList.remove('run-error');input.disabled=false;
+ }catch(error){
+  $('funding-status').textContent=error.message;input.disabled=true;$('funding-status').classList.add('run-error');
+ }
+}
+$('strategy-parameter-fields').addEventListener('input',syncStrategyParameters);
+$('strategy-parameter-fields').addEventListener('change',syncStrategyParameters);
+$('monthly-deposit').addEventListener('input',()=>{
+ try{$('flows').value=InvestmentLabUI.writeAmount($('flows').value,'monthly',$('monthly-deposit').value,'资金流');syncMonthlyDeposit();saveConfigDraft();}
+ catch(error){$('funding-status').textContent=error.message;$('funding-status').classList.add('run-error');}
+});
+$('flows').addEventListener('input',syncMonthlyDeposit);
+$('params').addEventListener('input',()=>{
+ try{
+  const value=parseStrategyParams();strategyParamsById[$('strategy').value]=value;
+  InvestmentLabStrategyForms.render($('strategy-parameter-fields'),strategyEntry(),value,selectedStrategySymbols());
+  $('strategy-parameter-status').textContent='已从高级 JSON 更新参数表单。';$('strategy-parameter-status').classList.remove('run-error');
+ }catch(error){$('strategy-parameter-status').textContent=error.message;$('strategy-parameter-status').classList.add('run-error');}
+ refreshConfigValidity();
+});
+$('symbols').onchange=()=>{renderStrategyParameters(false);updateStrategyScopeNote();refreshConfigValidity();};
+$('strategy').onchange=()=>{renderStrategyParameters(true);updateStrategyScopeNote();refreshConfigValidity();};
 $('benchmark').onchange=refreshConfigValidity;
 function dataSourcesHtml(request){
  const sources=request.data_sources||[{snapshot:request.snapshot,name:'原始数据快照'}];
@@ -146,7 +193,7 @@ $('monthly-example').onclick=safe(()=>{
  if(!flows||typeof flows!=='object'||Array.isArray(flows))throw new Error('入金/提款须为 JSON 对象');
  flows.monthly=3000;
  $('flows').value=JSON.stringify(flows,null,2);$('flows').focus();
- refreshGuidedInputs();
+ syncMonthlyDeposit();saveConfigDraft();
  notice('已填入每月入金3000，原有日期金额保留；入金与策略买入金额分别设置。');
 });
 function cashFlowPlanHtml(metadata){
@@ -156,9 +203,10 @@ function cashFlowPlanHtml(metadata){
 }
 let configReady=false, restoringConfig=false;
 function configRepository(){return ResearchConfig.repository(window.localStorage);}
-function currentConfig(){return ResearchConfig.capture(document,selectedSnapshotIds);}
+function currentConfig(){return ResearchConfig.capture(document,selectedSnapshotIds,Object.fromEntries(Object.entries(strategyParamsById).map(([id,value])=>[id,JSON.stringify(value)])));}
 function refreshConfigValidity(){
- $('run-button').disabled=!!datasetSelectionError();updatePriceModeNote();
+ const parameterError=strategyParameterError();
+ $('run-button').disabled=!!datasetSelectionError()||!!parameterError;updatePriceModeNote();
 }
 function saveConfigDraft(){
  if(!configReady||restoringConfig)return;
@@ -210,10 +258,15 @@ function applyConfig(input){
    if(['strategy','benchmark'].includes(id))restoreSelect(id,[config.fields[id]]);
    else $(id).value=config.fields[id];
   }
+  strategyParamsById=Object.fromEntries(Object.entries(config.strategyParams||{}).map(([id,value])=>[id,JSON.parse(value)]));
+  const strategyId=$('strategy').value;
+  if(!strategyParamsById[strategyId])strategyParamsById[strategyId]=JSON.parse(config.fields.params||'{}');
+  $('params').value=JSON.stringify(strategyParamsById[strategyId],null,2);
   restoreSelect('symbols',config.symbols);
+  activeStrategyId='';renderStrategyParameters(false);syncMonthlyDeposit();
   $('preset-name').value=config.name;
   $('dataset-search').value='';filterSnapshotOptions();
-  $('kind').onchange();updateStrategyScopeNote();refreshGuidedInputs();refreshConfigValidity();
+  $('kind').onchange();updateStrategyScopeNote();refreshConfigValidity();
  }finally{restoringConfig=false;}
  return datasetSelectionError();
 }
@@ -294,9 +347,28 @@ $('config-file').onchange=safe(async e=>{
 window.addEventListener('storage',e=>{
  if(e.key?.startsWith('investment-lab.research-preset.v1:'))safe(()=>refreshPresetList())();
 });
-async function loadStrategies(){const s=await api('/strategies');const old=$('strategy').value;$('strategy').innerHTML=Object.entries(s.builtins).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')+s.custom.map(n=>`<option value="custom:${esc(n)}">Python · ${esc(n)}</option>`).join('');if(old)restoreSelect('strategy',[old]);$('custom-files').innerHTML='<option value="">新建策略</option>'+s.custom.map(n=>`<option>${esc(n)}</option>`).join('');refreshGuidedInputs();if(configReady)refreshConfigValidity();}
+async function loadStrategies(){
+ const s=await api('/strategies'),old=$('strategy').value;
+ strategyCatalog=s.catalog?.strategies||[];
+ if(strategyCatalog.length!==22)throw new Error('内置策略目录不完整；请更新或重启本机服务。');
+ const groups=new Map();for(const item of strategyCatalog){if(!groups.has(item.category))groups.set(item.category,[]);groups.get(item.category).push(item);}
+ $('strategy').innerHTML=[...groups].map(([category,items])=>`<optgroup label="${esc(category)}">${items.map(item=>`<option value="${esc(item.id)}">${esc(item.name)}</option>`).join('')}</optgroup>`).join('')+s.custom.map(name=>`<option value="custom:${esc(name)}">Python · ${esc(name)}</option>`).join('');
+ if(old)restoreSelect('strategy',[old]);else if(strategyCatalog.length)$('strategy').value=strategyCatalog[0].id;
+ $('custom-files').innerHTML='<option value="">新建策略</option>'+s.custom.map(name=>`<option>${esc(name)}</option>`).join('');
+ activeStrategyId='';renderStrategyParameters(false);syncMonthlyDeposit();updateStrategyScopeNote();if(configReady)refreshConfigValidity();
+}
 $('kind').onchange=()=>{$('rolling-options').hidden=$('kind').value!=='rolling';$('holdout-options').hidden=$('kind').value!=='holdout';};
-$('run-form').onsubmit=safe(async e=>{e.preventDefault();const selectionError=datasetSelectionError();if(selectionError)throw new Error(selectionError);const config={start:$('start').value,end:$('end').value,symbols:[...$('symbols').selectedOptions].map(o=>o.value),initial_cash:$('cash').value,max_leverage:$('leverage').value,mode:$('mode').value,commission_bps:$('commission').value,slippage_bps:$('slippage').value,annual_interest:$('interest').value,warmup:Number($('warmup').value),cash_flows:JSON.parse($('flows').value),benchmark:$('benchmark').value||null,...JSON.parse($('advanced').value)};const chosen=$('strategy').value;const request={...(selectedSnapshotIds.length===1?{snapshot:selectedSnapshotIds[0]}:{snapshots:[...selectedSnapshotIds]}),config,strategy:chosen.startsWith('custom:')?'custom':chosen,params:JSON.parse($('params').value),kind:$('kind').value};if(chosen.startsWith('custom:'))request.strategy_file=chosen.slice(7);if(request.kind==='rolling')request.research={interval:$('interval').value,horizon:Number($('horizon').value),end_mode:$('end-mode').value};if(request.kind==='holdout')request.research={test_start:$('test-start').value,gap_sessions:Number($('gap').value)};$('run-button').disabled=true;try{const r=await api('/runs',request);currentRun=r.run_id;view('runs');await openRun(r.run_id,0,'holdout',false);}finally{$('run-button').disabled=!!datasetSelectionError();}});
+function currentStrategyParams(){
+ const entry=strategyEntry(),raw=parseStrategyParams(),symbols=selectedStrategySymbols();
+ const rawError=InvestmentLabStrategyForms.validateValues(entry,{...InvestmentLabStrategyForms.defaults(entry),...raw},symbols).error;
+ if(rawError)throw new Error(rawError);
+ const result=InvestmentLabStrategyForms.read($('strategy-parameter-fields'),entry,raw,symbols);
+ if(result.error)throw new Error(result.error);
+ strategyParamsById[$('strategy').value]=result.value;
+ $('params').value=JSON.stringify(result.value,null,2);
+ return result.value;
+}
+$('run-form').onsubmit=safe(async e=>{e.preventDefault();const selectionError=datasetSelectionError();if(selectionError)throw new Error(selectionError);const config={start:$('start').value,end:$('end').value,symbols:[...$('symbols').selectedOptions].map(o=>o.value),initial_cash:$('cash').value,max_leverage:$('leverage').value,mode:$('mode').value,commission_bps:$('commission').value,slippage_bps:$('slippage').value,annual_interest:$('interest').value,warmup:Number($('warmup').value),cash_flows:JSON.parse($('flows').value),benchmark:$('benchmark').value||null,...JSON.parse($('advanced').value)};const chosen=$('strategy').value,params=currentStrategyParams();const request={...(selectedSnapshotIds.length===1?{snapshot:selectedSnapshotIds[0]}:{snapshots:[...selectedSnapshotIds]}),config,strategy:chosen.startsWith('custom:')?'custom':chosen,params,kind:$('kind').value};if(chosen.startsWith('custom:'))request.strategy_file=chosen.slice(7);if(request.kind==='rolling')request.research={interval:$('interval').value,horizon:Number($('horizon').value),end_mode:$('end-mode').value};if(request.kind==='holdout')request.research={test_start:$('test-start').value,gap_sessions:Number($('gap').value)};$('run-button').disabled=true;try{const r=await api('/runs',request);currentRun=r.run_id;view('runs');await openRun(r.run_id,0,'holdout',false);}finally{refreshConfigValidity();}});
 const statusNames={queued:'排队中',running:'计算中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
 function progressInfo(d){const p=d.progress,done=Number(p?.done),total=Number(p?.total),valid=Number.isFinite(done)&&Number.isFinite(total)&&total>0,completed=valid?Math.min(total,Math.max(0,done)):0,percent=valid?Math.floor(completed/total*100):0,eta=p?.eta_seconds;return{valid,done:completed,total,percent,eta:eta===null||eta===undefined?null:Number(eta)};}
 function durationText(seconds){if(seconds===null||!Number.isFinite(seconds))return '估算中';if(seconds<=0)return '即将完成';const s=Math.ceil(seconds);if(s<60)return `${s} 秒`;if(s<3600)return `${Math.floor(s/60)} 分 ${s%60} 秒`;return `${Math.floor(s/3600)} 小时 ${Math.floor(s%3600/60)} 分钟`;}

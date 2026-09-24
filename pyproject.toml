@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "investment-lab"
-version = "0.2.3"
+version = "0.2.4"
 description = "本机投资策略研究与可复现回测"
 requires-python = ">=3.12,<3.13"
 dependencies = ["fastapi", "uvicorn", "pandas", "numpy", "PyYAML", "exchange-calendars", "tzdata", "psutil"]
@@ -20,7 +20,7 @@ investment-lab = "investment_lab.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-investment_lab = ["web/static/*"]
+investment_lab = ["web/static/*", "strategies/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

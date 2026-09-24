@@ -9,7 +9,7 @@ function storage() {
 }
 function config() {
   return {format: C.format, version: 1, name: '定投配置', snapshots: ['frozen-b', 'frozen-a'],
-    symbols: ['B', 'A'], fields: {...Object.fromEntries(C.fields.map(id => [id, ''])),
+    symbols: ['B', 'A'], strategyParams: {}, fields: {...Object.fromEntries(C.fields.map(id => [id, ''])),
       strategy: 'custom:定投.py', kind: 'rolling', cash: '12345.67', mode: 'reference_research',
       interval: 'quarter', horizon: '45', 'end-mode': 'common_end', 'test-start': '2025-01-02',
       gap: '5', params: '{"unfinished":', flows: '{\n  "monthly": 3000, "2024-02-01": -100\n}',

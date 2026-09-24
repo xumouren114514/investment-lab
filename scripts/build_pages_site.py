@@ -10,14 +10,18 @@ import shutil
 
 PROJECT = Path(__file__).resolve().parents[1]
 PAGE_ASSETS = ("index.html", "app.css", "app.js", "worker.js")
-SHARED_PAGE_ASSETS = {"ui-utils.js": PROJECT / "src/investment_lab/web/static/ui-utils.js"}
+SHARED_PAGE_ASSETS = {
+    "ui-utils.js": PROJECT / "src/investment_lab/web/static/ui-utils.js",
+    "strategy-forms.js": PROJECT / "src/investment_lab/web/static/strategy-forms.js",
+}
+CATALOG_PAGE_ASSET = PROJECT / "src/investment_lab/strategies/catalog.json"
 RUNTIME_FILES = (
     "__init__.py", "common.py",
     "engine/__init__.py", "engine/account.py", "engine/models.py", "engine/cash_flows.py",
     "engine/reference.py", "engine/core.py",
     "data/__init__.py", "data/compose.py", "data/validation.py",
     "research/__init__.py", "research/metrics.py", "research/experiments.py",
-    "strategies/__init__.py", "strategies/examples.py",
+    "strategies/__init__.py", "strategies/examples.py", "strategies/catalog.json",
 )
 
 
@@ -27,7 +31,7 @@ def build(output: Path) -> dict:
         if entry.is_symlink() or (hasattr(entry, "is_junction") and entry.is_junction()):
             raise ValueError(f"Pages 构建路径不能经过链接或 junction：{entry}")
     output = output.resolve()
-    expected = set(PAGE_ASSETS) | set(SHARED_PAGE_ASSETS) | {"portable-data.js", "runtime-manifest.json"}
+    expected = set(PAGE_ASSETS) | set(SHARED_PAGE_ASSETS) | {"portable-data.js", "strategy-catalog.json", "runtime-manifest.json"}
     expected.update(f"runtime/investment_lab/{name}" for name in RUNTIME_FILES)
     if output.exists():
         for entry in output.rglob("*"):
@@ -53,6 +57,12 @@ def build(output: Path) -> dict:
         target = output / name
         shutil.copyfile(source, target)
         copied.append((target.relative_to(output).as_posix(), target))
+
+    if not CATALOG_PAGE_ASSET.is_file():
+        raise FileNotFoundError(f"内置策略目录缺失：{CATALOG_PAGE_ASSET}")
+    catalog_target = output / "strategy-catalog.json"
+    shutil.copyfile(CATALOG_PAGE_ASSET, catalog_target)
+    copied.append((catalog_target.relative_to(output).as_posix(), catalog_target))
 
     helper = PROJECT / "src/investment_lab/web/static/portable-data.js"
     target = output / "portable-data.js"

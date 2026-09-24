@@ -1,4 +1,4 @@
-__version__ = "0.2.3"
-ENGINE_VERSION = "6"
-STRATEGY_API = "1"
+__version__ = "0.2.4"
+ENGINE_VERSION = "7"
+STRATEGY_API = "2"
 SCHEMA_VERSION = 1

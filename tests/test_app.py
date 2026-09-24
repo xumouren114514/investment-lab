@@ -19,6 +19,13 @@ def test_local_api_boundary_and_strategy_revision(tmp_path):
         assert client.get("/api/docs/OPERATIONS.md").status_code == 200
         assert client.get("/api/docs/ACCEPTANCE.md").status_code == 400
         assert client.get("/api/status").json()["real_datasets"] == 0
+        strategy_response = client.get("/api/strategies")
+        assert strategy_response.status_code == 200
+        catalog = strategy_response.json()["catalog"]
+        assert len(catalog["strategies"]) == 22
+        assert {"adaptive_dca", "target_allocation", "atr_trend_stop", "inverse_volatility"} <= {
+            item["id"] for item in catalog["strategies"]
+        }
         assert client.post("/api/strategy", json={"name":"a.py","code":"x=1"}).status_code == 403
         headers = {"X-Lab-Request":"local-ui"}
         assert client.post("/api/strategy", headers=headers, json={"name":"../outside.py","code":"x=1"}).status_code == 400

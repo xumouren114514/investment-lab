@@ -20,7 +20,7 @@ from investment_lab.engine.models import Config
 
 
 def code_fingerprint():
-    files = {str(p.relative_to(PROJECT)): digest(p.read_bytes()) for p in sorted((PROJECT / "src").rglob("*")) if p.is_file() and "__pycache__" not in p.parts and p.suffix in (".py", ".html", ".css", ".js")}
+    files = {str(p.relative_to(PROJECT)): digest(p.read_bytes()) for p in sorted((PROJECT / "src").rglob("*")) if p.is_file() and "__pycache__" not in p.parts and p.suffix in (".py", ".html", ".css", ".js", ".json")}
     return digest(files)
 
 
@@ -67,10 +67,12 @@ def create_run(store, request):
             source[p.relative_to(store.root / "user_strategies").as_posix()] = p.read_text(encoding="utf-8")
         entry = path.relative_to(store.root / "user_strategies").as_posix()
     else:
-        from investment_lab.strategies.examples import NAMES
+        from investment_lab.strategies.examples import NAMES, validate_params
         if strategy not in NAMES:
             raise ValueError("策略不存在")
+        validate_params(strategy, request.get("params", {}), config.symbols)
         source["examples.py"] = (PROJECT / "src/investment_lab/strategies/examples.py").read_text(encoding="utf-8")
+        source["catalog.json"] = (PROJECT / "src/investment_lab/strategies/catalog.json").read_text(encoding="utf-8")
         entry = "examples.py"
     if len(encoded(source)) > 10_000_000:
         raise ValueError("策略项目超过 10 MB，请拆出无关文件")

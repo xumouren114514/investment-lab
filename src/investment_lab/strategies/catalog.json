@@ -1,0 +1,833 @@
+{
+  "version": 1,
+  "strategies": [
+    {
+      "id": "buy_hold",
+      "name": "买入持有",
+      "category": "持有与投入",
+      "description": "按目标仓位买入后持有。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05,
+          "help": "按账户净值设置仓位；实际杠杆仍受账户和标的规则限制。"
+        }
+      ]
+    },
+    {
+      "id": "dca",
+      "name": "定期投入",
+      "category": "持有与投入",
+      "description": "按固定金额和频率投入，受可用现金限制。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "amount",
+          "label": "每次买入金额",
+          "type": "number",
+          "default": 1000,
+          "min": 0.01,
+          "step": 100,
+          "help": "买入金额，不等同于外部入金。"
+        },
+        {
+          "key": "frequency",
+          "label": "投入频率",
+          "type": "select",
+          "default": "monthly",
+          "options": [
+            {
+              "value": "weekly",
+              "label": "每周"
+            },
+            {
+              "value": "monthly",
+              "label": "每月"
+            },
+            {
+              "value": "quarterly",
+              "label": "每季"
+            }
+          ],
+          "help": "在每个周期的首个交易日下单。"
+        }
+      ]
+    },
+    {
+      "id": "adaptive_dca",
+      "name": "回撤加码定投",
+      "category": "持有与投入",
+      "description": "按周期投入；相对滚动高点回撤达到阈值时加大本期投入。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "amount",
+          "label": "基础投入金额",
+          "type": "number",
+          "default": 1000,
+          "min": 0.01,
+          "step": 100
+        },
+        {
+          "key": "frequency",
+          "label": "投入频率",
+          "type": "select",
+          "default": "monthly",
+          "options": [
+            {
+              "value": "weekly",
+              "label": "每周"
+            },
+            {
+              "value": "monthly",
+              "label": "每月"
+            },
+            {
+              "value": "quarterly",
+              "label": "每季"
+            }
+          ]
+        },
+        {
+          "key": "window",
+          "label": "回撤观察窗口（交易日）",
+          "type": "integer",
+          "default": 60,
+          "min": 2,
+          "max": 2000
+        },
+        {
+          "key": "drawdown_threshold",
+          "label": "加码回撤阈值",
+          "type": "number",
+          "default": 0.1,
+          "min": 0.001,
+          "max": 0.9,
+          "step": 0.01
+        },
+        {
+          "key": "multiplier",
+          "label": "加码倍数",
+          "type": "number",
+          "default": 2,
+          "min": 1,
+          "max": 10,
+          "step": 0.25,
+          "help": "达阈值时乘以基础投入；仍受账户现金限制。"
+        }
+      ]
+    },
+    {
+      "id": "monthly_equal_weight",
+      "name": "月度定投与动态等权",
+      "category": "组合配置",
+      "description": "首次配置及每月检查时补低配标的，可选择主动再平衡。",
+      "scope": "multi",
+      "parameters": [
+        {
+          "key": "portfolio_mode",
+          "label": "月度调仓方式",
+          "type": "select",
+          "default": "rebalance",
+          "options": [
+            {
+              "value": "rebalance",
+              "label": "达到偏离阈值时恢复等权"
+            },
+            {
+              "value": "no_rebalance",
+              "label": "不主动卖出，只补低配标的"
+            }
+          ]
+        },
+        {
+          "key": "rebalance_threshold",
+          "label": "再平衡偏离阈值",
+          "type": "number",
+          "default": 0.05,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "suffix": "目标权重比例"
+        },
+        {
+          "key": "month_end_dates",
+          "label": "指定检查日期",
+          "type": "date_list",
+          "default": [],
+          "help": "可留空，留空时以次月首个交易日代理月末。"
+        }
+      ]
+    },
+    {
+      "id": "target_allocation",
+      "name": "目标比例配置与再平衡",
+      "category": "组合配置",
+      "description": "为所选标的设置目标权重，按日历周期或偏离阈值再平衡。",
+      "scope": "multi",
+      "parameters": [
+        {
+          "key": "weights",
+          "label": "各标的目标比例",
+          "type": "weights",
+          "default": {},
+          "maxTotal": 1,
+          "help": "权重总和不超过100%；未分配部分保留现金。"
+        },
+        {
+          "key": "frequency",
+          "label": "检查频率",
+          "type": "select",
+          "default": "monthly",
+          "options": [
+            {
+              "value": "monthly",
+              "label": "每月"
+            },
+            {
+              "value": "quarterly",
+              "label": "每季"
+            },
+            {
+              "value": "yearly",
+              "label": "每年"
+            }
+          ]
+        },
+        {
+          "key": "rebalance_threshold",
+          "label": "最小偏离阈值",
+          "type": "number",
+          "default": 0.05,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        }
+      ]
+    },
+    {
+      "id": "moving_average",
+      "name": "均线趋势过滤",
+      "category": "趋势与动量",
+      "description": "收盘价高于历史简单均线时持有目标仓位，否则退出。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "均线窗口（交易日）",
+          "type": "integer",
+          "default": 20,
+          "min": 2,
+          "max": 2000
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "ema_crossover",
+      "name": "EMA 双均线交叉",
+      "category": "趋势与动量",
+      "description": "短期指数均线上穿长期均线时持有，下穿时退出。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "fast_window",
+          "label": "短期窗口",
+          "type": "integer",
+          "default": 12,
+          "min": 2,
+          "max": 1000
+        },
+        {
+          "key": "slow_window",
+          "label": "长期窗口",
+          "type": "integer",
+          "default": 26,
+          "min": 3,
+          "max": 2000
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "macd",
+      "name": "MACD 趋势策略",
+      "category": "趋势与动量",
+      "description": "MACD 线与信号线金叉持有，死叉退出。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "fast_window",
+          "label": "快线窗口",
+          "type": "integer",
+          "default": 12,
+          "min": 2,
+          "max": 1000
+        },
+        {
+          "key": "slow_window",
+          "label": "慢线窗口",
+          "type": "integer",
+          "default": 26,
+          "min": 3,
+          "max": 2000
+        },
+        {
+          "key": "signal_window",
+          "label": "信号线窗口",
+          "type": "integer",
+          "default": 9,
+          "min": 2,
+          "max": 500
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "time_series_momentum",
+      "name": "时序动量",
+      "category": "趋势与动量",
+      "description": "自身滚动区间收益超过门槛时持有，否则退出。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "动量窗口（交易日）",
+          "type": "integer",
+          "default": 120,
+          "min": 2,
+          "max": 2000
+        },
+        {
+          "key": "threshold",
+          "label": "最低区间收益",
+          "type": "number",
+          "default": 0,
+          "min": -0.99,
+          "max": 10,
+          "step": 0.01
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "rotation",
+      "name": "同市场动量轮动",
+      "category": "趋势与动量",
+      "description": "在所选标的中按滚动收益排序，定期持有领先标的。",
+      "scope": "multi",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "动量窗口（交易日）",
+          "type": "integer",
+          "default": 20,
+          "min": 2,
+          "max": 2000
+        },
+        {
+          "key": "top_n",
+          "label": "持有领先标的数量",
+          "type": "integer",
+          "default": 1,
+          "min": 1,
+          "max": 100
+        },
+        {
+          "key": "frequency",
+          "label": "检查频率",
+          "type": "select",
+          "default": "monthly",
+          "options": [
+            {
+              "value": "weekly",
+              "label": "每周"
+            },
+            {
+              "value": "monthly",
+              "label": "每月"
+            },
+            {
+              "value": "quarterly",
+              "label": "每季"
+            }
+          ]
+        },
+        {
+          "key": "weight",
+          "label": "总目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "donchian_breakout",
+      "name": "唐奇安通道突破",
+      "category": "趋势与动量",
+      "description": "收盘价突破前期高点区间时进入，跌破退出区间时退出。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "entry_window",
+          "label": "入场窗口",
+          "type": "integer",
+          "default": 20,
+          "min": 2,
+          "max": 2000
+        },
+        {
+          "key": "exit_window",
+          "label": "退出窗口",
+          "type": "integer",
+          "default": 10,
+          "min": 2,
+          "max": 2000
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "drawdown_buy",
+      "name": "回撤买入",
+      "category": "均值回归与回撤",
+      "description": "相对滚动高点回撤达到阈值时建立目标仓位。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "高点观察窗口",
+          "type": "integer",
+          "default": 60,
+          "min": 2,
+          "max": 2000
+        },
+        {
+          "key": "threshold",
+          "label": "回撤阈值",
+          "type": "number",
+          "default": 0.1,
+          "min": 0.001,
+          "max": 0.9,
+          "step": 0.01
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "drawdown_ladder",
+      "name": "分层回撤买入",
+      "category": "均值回归与回撤",
+      "description": "回撤逐级加深时分批买入，每一级只触发一次。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "高点观察窗口",
+          "type": "integer",
+          "default": 120,
+          "min": 2,
+          "max": 2000
+        },
+        {
+          "key": "first_drawdown",
+          "label": "首档回撤",
+          "type": "number",
+          "default": 0.1,
+          "min": 0.001,
+          "max": 0.9,
+          "step": 0.01
+        },
+        {
+          "key": "step",
+          "label": "每档间隔",
+          "type": "number",
+          "default": 0.05,
+          "min": 0.001,
+          "max": 0.5,
+          "step": 0.01
+        },
+        {
+          "key": "amount",
+          "label": "每档投入金额",
+          "type": "number",
+          "default": 1000,
+          "min": 0.01,
+          "step": 100
+        },
+        {
+          "key": "max_steps",
+          "label": "最多档数",
+          "type": "integer",
+          "default": 5,
+          "min": 1,
+          "max": 100
+        }
+      ]
+    },
+    {
+      "id": "rsi_mean_reversion",
+      "name": "RSI 均值回归",
+      "category": "均值回归与回撤",
+      "description": "RSI 低于超卖线时进入，回升到退出线时退出。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "RSI 窗口",
+          "type": "integer",
+          "default": 14,
+          "min": 2,
+          "max": 500
+        },
+        {
+          "key": "entry",
+          "label": "入场线（超卖）",
+          "type": "number",
+          "default": 30,
+          "min": 1,
+          "max": 49,
+          "step": 1
+        },
+        {
+          "key": "exit",
+          "label": "退出线",
+          "type": "number",
+          "default": 55,
+          "min": 2,
+          "max": 99,
+          "step": 1
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "bollinger_mean_reversion",
+      "name": "布林带均值回归",
+      "category": "均值回归与回撤",
+      "description": "收盘价触及下轨时进入，回到中轨时退出。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "均线窗口",
+          "type": "integer",
+          "default": 20,
+          "min": 2,
+          "max": 1000
+        },
+        {
+          "key": "deviations",
+          "label": "标准差倍数",
+          "type": "number",
+          "default": 2,
+          "min": 0.1,
+          "max": 6,
+          "step": 0.1
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "stochastic_mean_reversion",
+      "name": "随机指标均值回归",
+      "category": "均值回归与回撤",
+      "description": "%K 低于超卖线时进入，回升至退出线时退出。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "高低价窗口",
+          "type": "integer",
+          "default": 14,
+          "min": 2,
+          "max": 500
+        },
+        {
+          "key": "entry",
+          "label": "入场线",
+          "type": "number",
+          "default": 20,
+          "min": 1,
+          "max": 49,
+          "step": 1
+        },
+        {
+          "key": "exit",
+          "label": "退出线",
+          "type": "number",
+          "default": 50,
+          "min": 2,
+          "max": 99,
+          "step": 1
+        },
+        {
+          "key": "weight",
+          "label": "目标仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "atr_trend_stop",
+      "name": "ATR趋势、风险仓位与收盘止损",
+      "category": "风险控制",
+      "description": "趋势线上方按止损距离估算风险仓位；收盘跌破持仓后最高收盘价减 ATR 倍数时退出，下一交易日模拟成交。风险预算是研究假设，不保证实际最大亏损。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "trend_window",
+          "label": "趋势均线窗口",
+          "type": "integer",
+          "default": 20,
+          "min": 2,
+          "max": 1000
+        },
+        {
+          "key": "atr_window",
+          "label": "ATR窗口",
+          "type": "integer",
+          "default": 14,
+          "min": 2,
+          "max": 500
+        },
+        {
+          "key": "atr_multiplier",
+          "label": "止损 ATR 倍数",
+          "type": "number",
+          "default": 3,
+          "min": 0.1,
+          "max": 20,
+          "step": 0.1
+        },
+        {
+          "key": "risk_fraction",
+          "label": "每笔风险预算比例",
+          "type": "number",
+          "default": 0.01,
+          "min": 0.001,
+          "max": 0.1,
+          "step": 0.001,
+          "help": "按账户权益的比例估算仓位；不代表最大亏损保证。"
+        },
+        {
+          "key": "max_weight",
+          "label": "最大仓位 / 杠杆",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "volatility_target",
+      "name": "波动率目标仓位",
+      "category": "风险控制",
+      "description": "按滚动实现波动率缩放仓位，并受最大目标仓位约束。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "波动率窗口",
+          "type": "integer",
+          "default": 20,
+          "min": 2,
+          "max": 1000
+        },
+        {
+          "key": "target_volatility",
+          "label": "年化波动率目标",
+          "type": "number",
+          "default": 0.15,
+          "min": 0.001,
+          "max": 5,
+          "step": 0.01
+        },
+        {
+          "key": "max_weight",
+          "label": "最大仓位",
+          "type": "number",
+          "default": 0.95,
+          "min": 0,
+          "max": 10,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "id": "inverse_volatility",
+      "name": "反波动率组合配置",
+      "category": "组合配置",
+      "description": "定期按各标的滚动波动率倒数分配仓位；最大比例约束后的余额保留现金。",
+      "scope": "multi",
+      "parameters": [
+        {
+          "key": "window",
+          "label": "波动率窗口",
+          "type": "integer",
+          "default": 60,
+          "min": 2,
+          "max": 1000
+        },
+        {
+          "key": "frequency",
+          "label": "再平衡频率",
+          "type": "select",
+          "default": "monthly",
+          "options": [
+            {
+              "value": "monthly",
+              "label": "每月"
+            },
+            {
+              "value": "quarterly",
+              "label": "每季"
+            },
+            {
+              "value": "yearly",
+              "label": "每年"
+            }
+          ]
+        },
+        {
+          "key": "max_weight",
+          "label": "单一标的最大比例",
+          "type": "number",
+          "default": 0.5,
+          "min": 0.01,
+          "max": 1,
+          "step": 0.01
+        }
+      ]
+    },
+    {
+      "id": "leverage_rebalance",
+      "name": "杠杆再平衡",
+      "category": "风险控制",
+      "description": "每日尝试恢复目标杠杆；是否能成交取决于账户与标的约束。",
+      "scope": "single",
+      "parameters": [
+        {
+          "key": "weight",
+          "label": "目标杠杆仓位",
+          "type": "number",
+          "default": 1.5,
+          "min": 0,
+          "max": 10,
+          "step": 0.1
+        }
+      ]
+    },
+    {
+      "id": "futures_roll",
+      "name": "月份合约换月",
+      "category": "研究与对照",
+      "description": "按预先固定的日期安排换月，不使用未来成交量选合约。",
+      "scope": "multi",
+      "parameters": [
+        {
+          "key": "roll_schedule",
+          "label": "日期到合约映射",
+          "type": "json",
+          "default": {},
+          "help": "例如 {\"2026-03-01\":\"IF2606\"}。"
+        },
+        {
+          "key": "contracts",
+          "label": "合约数量",
+          "type": "integer",
+          "default": 1,
+          "min": 1,
+          "max": 100000
+        }
+      ]
+    },
+    {
+      "id": "cash",
+      "name": "持有现金",
+      "category": "研究与对照",
+      "description": "不下单，用于核对区间、资金流和结果。",
+      "scope": "multi",
+      "parameters": []
+    }
+  ]
+}

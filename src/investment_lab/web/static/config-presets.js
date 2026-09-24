@@ -22,9 +22,22 @@
         throw new Error('配置中的快照或标的列表无效。');
       }
     }
+    const strategyParams = value.strategyParams === undefined ? {} : value.strategyParams;
+    if (!strategyParams || typeof strategyParams !== 'object' || Array.isArray(strategyParams) ||
+        Object.keys(strategyParams).length > 100 || Object.entries(strategyParams).some(([key, params]) =>
+          !key || key.length > 256 || typeof params !== 'string' || params.length > 100_000)) {
+      throw new Error('配置中的分策略参数无效。');
+    }
+    for (const [key, params] of Object.entries(strategyParams)) {
+      try {
+        const parsed = JSON.parse(params);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+      } catch { throw new Error(`配置中的 ${key} 策略参数不是有效 JSON 对象。`); }
+    }
     // Copy only known keys; files cannot inject extra form fields or executable code.
     return {format, version: 1, name: value.name, snapshots: [...value.snapshots],
-      symbols: [...value.symbols], fields: Object.fromEntries(fields.map(id => [id, value.fields[id]]))};
+      symbols: [...value.symbols], fields: Object.fromEntries(fields.map(id => [id, value.fields[id]])),
+      strategyParams: {...strategyParams}};
   }
 
   function encode(value) {
@@ -41,10 +54,10 @@
     return validate(value);
   }
 
-  function capture(doc, snapshots) {
+  function capture(doc, snapshots, strategyParams = {}) {
     return validate({format, version: 1, name: doc.getElementById('preset-name').value,
       snapshots, symbols: [...doc.getElementById('symbols').selectedOptions].map(o => o.value),
-      fields: Object.fromEntries(fields.map(id => [id, doc.getElementById(id).value]))});
+      fields: Object.fromEntries(fields.map(id => [id, doc.getElementById(id).value])), strategyParams});
   }
 
   // One key per named preset avoids overwriting other presets when two tabs save.

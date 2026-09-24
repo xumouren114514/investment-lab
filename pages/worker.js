@@ -6,27 +6,43 @@ const SOURCE_FILES = [
   'engine/__init__.py', 'engine/account.py', 'engine/models.py', 'engine/cash_flows.py', 'engine/reference.py', 'engine/core.py',
   'data/__init__.py', 'data/compose.py', 'data/validation.py',
   'research/__init__.py', 'research/metrics.py', 'research/experiments.py',
-  'strategies/__init__.py', 'strategies/examples.py',
+  'strategies/__init__.py', 'strategies/examples.py', 'strategies/catalog.json',
 ];
 
 let runtimePromise;
 let pyodide;
 let numpyLoaded = false;
 let messageQueue = Promise.resolve();
+let loadedManifestHash;
 
-async function runtime() {
+async function sha256Hex(value) {
+  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function runtime(expectedManifestHash = null) {
   if (!runtimePromise) {
     runtimePromise = (async () => {
       pyodide = await loadPyodide({indexURL: PYODIDE_BASE});
+      const manifestResponse = await fetch(new URL('./runtime-manifest.json', import.meta.url), {cache:'no-store'});
+      if (!manifestResponse.ok) throw new Error(`无法读取浏览器计算版本清单（${manifestResponse.status}）`);
+      const manifestText = await manifestResponse.text();
+      const manifest = JSON.parse(manifestText);
+      loadedManifestHash = await sha256Hex(new TextEncoder().encode(manifestText));
       pyodide.FS.mkdirTree('/runtime/investment_lab');
       for (const relative of SOURCE_FILES) {
         const sourceUrl = new URL(`./runtime/investment_lab/${relative}`, import.meta.url);
-        const response = await fetch(sourceUrl);
+        const response = await fetch(sourceUrl, {cache:'no-store'});
         if (!response.ok) throw new Error(`无法读取浏览器计算模块 ${relative}（${response.status}）`);
+        const source = new Uint8Array(await response.arrayBuffer());
+        const manifestPath = `runtime/investment_lab/${relative}`;
+        const expectedHash = manifest.files?.[manifestPath];
+        if (!expectedHash || await sha256Hex(source) !== expectedHash) throw new Error(`浏览器计算模块版本不匹配：${relative}；请刷新页面。`);
         const target = `/runtime/investment_lab/${relative}`;
         const parent = target.slice(0, target.lastIndexOf('/'));
         pyodide.FS.mkdirTree(parent);
-        pyodide.FS.writeFile(target, new Uint8Array(await response.arrayBuffer()));
+        pyodide.FS.writeFile(target, source);
       }
       pyodide.runPython("import sys; sys.path.insert(0, '/runtime')");
       return pyodide;
@@ -35,7 +51,9 @@ async function runtime() {
       throw error;
     });
   }
-  return runtimePromise;
+  const instance = await runtimePromise;
+  if (expectedManifestHash && expectedManifestHash !== loadedManifestHash) throw new Error('当前页面与计算引擎版本不一致；请刷新页面后重试。');
+  return instance;
 }
 
 const VERIFY_CODE = `
@@ -108,7 +126,7 @@ from investment_lab.data.compose import compose_portable_manifests, validate_com
 from investment_lab.engine.core import simulate
 from investment_lab.engine.models import Config
 from investment_lab.research.experiments import benchmark_result, holdout, rolling
-from investment_lab.strategies.examples import Builtin
+from investment_lab.strategies.examples import Builtin, NAMES, validate_params
 
 request = json.loads(run_json)
 packages = [json.loads(item) for item in request['packages']]
@@ -126,9 +144,10 @@ bars = [row for package in packages for row in package['bars']]
 config = Config(**request['config'])
 validate_composed_selection(manifest, config)
 strategy_name = request['strategy']
-if strategy_name not in ('buy_hold', 'dca', 'monthly_equal_weight', 'moving_average', 'drawdown_buy', 'rotation', 'leverage_rebalance', 'futures_roll', 'cash'):
+if strategy_name not in NAMES:
     raise ValueError('浏览器版只支持内置策略。')
 params = request.get('params', {})
+validate_params(strategy_name, params, config.symbols)
 research = request.get('research', {})
 run_id = request['run_id']
 def factory():
@@ -163,7 +182,7 @@ function reply(requestId, payload) {
 async function processMessage(data) {
   const {requestId, type} = data || {};
   try {
-    const py = await runtime();
+    const py = await runtime(data?.request?.engine_manifest_hash || null);
     if (type === 'verify') {
       py.globals.set('package_json', data.packageJson);
       const value = JSON.parse(py.runPython(VERIFY_CODE));

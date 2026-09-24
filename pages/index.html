@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f3f6fb">
   <title>投资研究室 · 浏览器版</title>
-  <link rel="stylesheet" href="./app.css?v=20260924-1">
-  <script src="./ui-utils.js?v=20260924-1"></script>
+  <link rel="stylesheet" href="./app.css?v=20260924-7">
+  <script src="./ui-utils.js?v=20260924-7"></script>
+  <script src="./strategy-forms.js?v=20260924-7"></script>
   <script src="./portable-data.js" defer></script>
-  <script type="module" src="./app.js?v=20260924-1"></script>
+  <script type="module" src="./app.js?v=20260924-7"></script>
 </head>
 <body>
   <header class="topbar">
@@ -39,13 +40,14 @@
       <p id="package-status" class="help" role="status" aria-live="polite"></p>
       <div id="snapshot-list" class="snapshot-list" role="group" aria-label="选择用于本次回测的数据快照"></div>
       <div id="symbol-list" class="symbol-list"></div>
+      <p id="strategy-scope-note" class="help"></p>
     </section>
 
     <section class="panel" aria-labelledby="research-title">
       <div class="section-heading"><div><p class="eyebrow">02 · 研究假设</p><h2 id="research-title">回测配置</h2></div><span class="muted">配置草稿自动保存在此浏览器</span></div>
       <form id="research-form">
         <div class="field-grid">
-          <label>策略<select id="strategy"><option value="buy_hold">买入持有</option><option value="dca">定期投入</option><option value="monthly_equal_weight">月度定投与动态等权</option><option value="moving_average">均线</option><option value="drawdown_buy">回撤买入</option><option value="rotation">同市场轮动</option><option value="leverage_rebalance">杠杆再平衡</option><option value="futures_roll">月份合约换月</option><option value="cash">持有现金</option></select></label>
+          <label>策略<select id="strategy"><option value="">正在读取策略目录…</option></select></label>
           <label>研究方式<select id="kind"><option value="single">单次回测</option><option value="rolling">滚动起点回测</option><option value="holdout">开发区间 / 留出验证</option></select></label>
           <label>开始日期<input id="start" type="date" required></label>
           <label>结束日期<input id="end" type="date" required></label>
@@ -54,14 +56,11 @@
           <label>成交价格模式<select id="mode"><option value="strict_vwap">严格 VWAP · 缺口阻止运行</option><option value="estimated_vwap">估算 VWAP · 显式标记</option><option value="close_research">收盘价研究 · 不进正常排名</option><option value="reference_research">参考历史价格 · 非实际成交</option></select></label>
           <label>基准<select id="benchmark"><option value="">不设置</option></select></label>
         </div>
-        <section class="guide-panel" aria-labelledby="guide-title">
-          <div><p class="eyebrow">更简单的常用设置</p><h3 id="guide-title">策略说明与定投</h3><p id="strategy-help" class="help" aria-live="polite">选择策略后，这里会解释它何时下单、主要参数代表什么。</p></div>
-          <div class="field-grid guide-fields">
-            <label>每月自动入金（可选）<input id="monthly-deposit-guide" type="number" min="0" step="0.01" placeholder="留空表示不定期入金"><span class="help">每个自然月的首个交易日入账，首月也会计入；这只是把现金存入账户，不会自动买入。</span></label>
-            <label id="dca-amount-row" hidden>定投每次买入金额<input id="dca-amount-guide" type="number" min="0.01" step="0.01"><span class="help">每月首个交易日下单；留空恢复默认1000。实际买入还受账户可用现金和成交限制影响。</span></label>
-            <label id="equal-weight-mode-row" hidden>月度调仓方式<select id="equal-weight-mode-guide"><option value="rebalance">偏离至少5个百分点时恢复等权</option><option value="no_rebalance">不卖出调仓，只补低配标的</option></select><span class="help">账户有可用现金时优先补低配标的。</span></label>
-          </div>
-          <p id="guide-status" class="help" role="status" aria-live="polite">高级 JSON 仍可在下方调整；常用输入会同步保留原有其他参数。</p>
+        <fieldset class="funding-fields"><legend>资金计划</legend><label>每月自动入金（可选）<input id="monthly-deposit" type="number" min="0" step="0.01" placeholder="留空表示不定期入金"><span class="help">每个自然月的首个交易日入账，首月也会计入；只增加现金，不会自动买入。</span></label><p id="funding-status" class="help" role="status" aria-live="polite"></p></fieldset>
+        <section class="strategy-parameter-panel" aria-labelledby="strategy-parameters-title">
+          <div class="section-heading"><h3 id="strategy-parameters-title">策略参数</h3><span id="strategy-count" class="muted"></span></div>
+          <div id="strategy-parameter-fields" aria-live="polite"></div>
+          <p id="strategy-parameter-status" class="help" role="status" aria-live="polite"></p>
         </section>
         <details class="advanced">
           <summary>高级设置：费用、JSON 参数与研究方式</summary>
@@ -71,7 +70,7 @@
             <label>滑点（基点）<input id="slippage" type="number" min="0" step="any" value="5"></label>
             <label>年融资利率<input id="interest" type="number" min="0" step="0.01" value="0.06"></label>
             <label>策略参数（JSON）<textarea id="params" rows="3">{"weight":0.95}</textarea><span class="help">适用于专业参数。月度动态等权还支持 month_end_dates（指定检查日期；留空时用下月首个交易日代理月末）。</span></label>
-            <label>额外入金 / 提款（JSON）<textarea id="flows" rows="3">{}</textarea><span class="help">用于单日金额等高级安排；每月入金请用上方输入框，避免重复填写。</span></label>
+            <label>额外入金 / 提款（JSON）<textarea id="flows" rows="3">{}</textarea><span class="help">用于特殊日期金额；每月入金请使用上方“资金计划”输入框，避免重复填写。</span></label>
           </div>
           <div id="rolling-fields" class="field-grid" hidden>
             <label>起点间隔<select id="interval"><option value="month">每月</option><option value="day">每日</option><option value="quarter">每季</option><option value="year">每年</option></select></label>
