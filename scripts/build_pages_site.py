@@ -10,6 +10,7 @@ import shutil
 
 PROJECT = Path(__file__).resolve().parents[1]
 PAGE_ASSETS = ("index.html", "app.css", "app.js", "worker.js")
+SHARED_PAGE_ASSETS = {"ui-utils.js": PROJECT / "src/investment_lab/web/static/ui-utils.js"}
 RUNTIME_FILES = (
     "__init__.py", "common.py",
     "engine/__init__.py", "engine/account.py", "engine/models.py", "engine/cash_flows.py",
@@ -26,7 +27,7 @@ def build(output: Path) -> dict:
         if entry.is_symlink() or (hasattr(entry, "is_junction") and entry.is_junction()):
             raise ValueError(f"Pages 构建路径不能经过链接或 junction：{entry}")
     output = output.resolve()
-    expected = set(PAGE_ASSETS) | {"portable-data.js", "runtime-manifest.json"}
+    expected = set(PAGE_ASSETS) | set(SHARED_PAGE_ASSETS) | {"portable-data.js", "runtime-manifest.json"}
     expected.update(f"runtime/investment_lab/{name}" for name in RUNTIME_FILES)
     if output.exists():
         for entry in output.rglob("*"):
@@ -43,6 +44,13 @@ def build(output: Path) -> dict:
             raise FileNotFoundError(f"Pages 源文件缺失：{source}")
         target = output / name
         target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        copied.append((target.relative_to(output).as_posix(), target))
+
+    for name, source in SHARED_PAGE_ASSETS.items():
+        if not source.is_file():
+            raise FileNotFoundError(f"浏览器共用界面模块缺失：{source}")
+        target = output / name
         shutil.copyfile(source, target)
         copied.append((target.relative_to(output).as_posix(), target))
 

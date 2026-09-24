@@ -1,7 +1,7 @@
 import json
 import pytest
 
-from scripts.build_pages_site import RUNTIME_FILES, build
+from scripts.build_pages_site import PAGE_ASSETS, RUNTIME_FILES, SHARED_PAGE_ASSETS, build
 
 
 def test_pages_build_contains_allowlisted_app_and_engine_without_local_data(tmp_path):
@@ -10,6 +10,8 @@ def test_pages_build_contains_allowlisted_app_and_engine_without_local_data(tmp_
     assert (output / "index.html").is_file()
     assert (output / "app.js").is_file()
     assert (output / "worker.js").is_file()
+    assert (output / "ui-utils.js").is_file()
+    assert (output / "ui-utils.js").read_bytes() == next(iter(SHARED_PAGE_ASSETS.values())).read_bytes()
     assert all((output / "runtime/investment_lab" / name).is_file() for name in RUNTIME_FILES)
     assert "investment_lab_snapshot" not in json.dumps(manifest)
     assert not (output / "local_config").exists()
@@ -18,7 +20,7 @@ def test_pages_build_contains_allowlisted_app_and_engine_without_local_data(tmp_
     assert 'value="monthly_equal_weight"' in (output / "index.html").read_text(encoding="utf-8")
     assert "monthly_equal_weight" in (output / "worker.js").read_text(encoding="utf-8")
     assert "monthly_equal_weight" in (output / "runtime/investment_lab/strategies/examples.py").read_text(encoding="utf-8")
-    assert len(manifest["files"]) == 4 + 1 + len(RUNTIME_FILES)
+    assert len(manifest["files"]) == len(PAGE_ASSETS) + len(SHARED_PAGE_ASSETS) + 1 + len(RUNTIME_FILES)
 
 
 def test_pages_build_refuses_to_publish_unlisted_existing_files(tmp_path):

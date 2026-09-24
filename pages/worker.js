@@ -95,7 +95,7 @@ if not bars or any(not isinstance(row, dict) or not isinstance(row.get('symbol')
 errors = validate_dataset(manifest['securities'], bars, manifest.get('actions', []), manifest['sessions'], manifest['synthetic'])
 if errors:
     raise ValueError('行情校验失败：' + '；'.join(errors[:6]))
-json.dumps({'snapshot_id': snapshot, 'name': manifest['name'], 'synthetic': manifest['synthetic'], 'rows': len(bars), 'source': manifest.get('source', {})}, ensure_ascii=False)
+json.dumps({'snapshot_id': snapshot, 'name': manifest['name'], 'synthetic': manifest['synthetic'], 'rows': len(bars), 'source': manifest.get('source', {}), 'securities': manifest['securities'], 'sessions': manifest['sessions']}, ensure_ascii=False)
 `;
 
 const RUN_CODE = `

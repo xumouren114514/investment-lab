@@ -95,8 +95,36 @@ function updateStrategyScopeNote(){
  const single=['buy_hold','dca','moving_average','drawdown_buy','leverage_rebalance'].includes(strategy);
  $('strategy-scope-note').textContent=symbols.length>1&&single?`此内置策略只交易第一项：${symbols[0].textContent}。多标的交易可选“同市场轮动”或使用 Python 策略；勾选数据不会自动分配仓位。`:'所选标的共用同一账户和初始资金，实际买卖由策略决定。';
 }
+const strategyGuideText={
+ buy_hold:'买入持有：首次满足数据与成交条件时建立目标仓位，之后持有。目标仓位等高级参数可在下方 JSON 中调整。',
+ dca:'定期投入：每月首个交易日尝试按“每次买入金额”下单；每月自动入金是另一回事，只给账户补充现金。',
+ monthly_equal_weight:'月度定投与动态等权：首次配置及月度检查时用可用现金优先补低配标的；可选择是否在权重偏离时卖出再平衡。',
+ moving_average:'均线：比较已知收盘价与历史均线，达到条件后建立或退出目标仓位；窗口长度可在高级策略参数中调整。',
+ drawdown_buy:'回撤买入：价格相对历史窗口高点跌到设定阈值时建立目标仓位；窗口和回撤阈值在高级策略参数中调整。',
+ rotation:'同市场轮动：按历史动量在所选标的中选择领先者，每月检查；多标的会共用同一账户。',
+ leverage_rebalance:'杠杆再平衡：每日尝试恢复目标杠杆，融资、费用及成交限制会影响结果；请谨慎检查假设。',
+ futures_roll:'月份合约换月：按预先提供的固定日期安排换月，不会使用未来成交量挑选合约。',
+ cash:'持有现金：不下买单，可用来核对资金流、区间和结果展示。',
+};
+function refreshGuidedInputs(){
+ const strategy=$('strategy').value,errors=[];
+ $('strategy-help').textContent=strategyGuideText[strategy]||'当前 Python 策略的说明与参数请查看策略文件；常用资金流输入仍可直接使用。';
+ $('dca-amount-row').hidden=strategy!=='dca';$('equal-weight-mode-row').hidden=strategy!=='monthly_equal_weight';
+ try{if(document.activeElement!==$('monthly-deposit-guide'))$('monthly-deposit-guide').value=InvestmentLabUI.readAmount($('flows').value,'monthly','资金流');$('monthly-deposit-guide').disabled=false;}
+ catch(e){$('monthly-deposit-guide').disabled=true;errors.push(e.message);}
+ try{if(document.activeElement!==$('dca-amount-guide'))$('dca-amount-guide').value=InvestmentLabUI.readAmount($('params').value,'amount','策略参数')||'1000';if(document.activeElement!==$('equal-weight-mode-guide'))$('equal-weight-mode-guide').value=InvestmentLabUI.readChoice($('params').value,'portfolio_mode','rebalance',['rebalance','no_rebalance'],'策略参数');$('dca-amount-guide').disabled=false;$('equal-weight-mode-guide').disabled=false;}
+ catch(e){$('dca-amount-guide').disabled=true;$('equal-weight-mode-guide').disabled=true;errors.push(e.message);}
+ $('guide-status').textContent=errors.length?`${errors.join(' ')} 请展开高级设置修正 JSON。`:'常用输入会同步写入参数并保留其他内容；特殊日期仍可在高级 JSON 中填写。';
+ $('guide-status').classList.toggle('guide-error',errors.length>0);
+}
+function writeGuidedAmount(inputId,textareaId,key,label){try{$(textareaId).value=InvestmentLabUI.writeAmount($(textareaId).value,key,$(inputId).value,label);refreshGuidedInputs();saveConfigDraft();}catch(e){$('guide-status').textContent=e.message;$('guide-status').classList.add('guide-error');}}
+$('monthly-deposit-guide').oninput=()=>writeGuidedAmount('monthly-deposit-guide','flows','monthly','资金流');
+$('dca-amount-guide').oninput=()=>writeGuidedAmount('dca-amount-guide','params','amount','策略参数');
+$('monthly-deposit-guide').onblur=refreshGuidedInputs;$('dca-amount-guide').onblur=refreshGuidedInputs;
+$('equal-weight-mode-guide').onchange=()=>{try{$('params').value=InvestmentLabUI.writeChoice($('params').value,'portfolio_mode',$('equal-weight-mode-guide').value,['rebalance','no_rebalance'],'策略参数');refreshGuidedInputs();saveConfigDraft();}catch(e){$('guide-status').textContent=e.message;$('guide-status').classList.add('guide-error');}};
+$('flows').addEventListener('input',refreshGuidedInputs);$('params').addEventListener('input',refreshGuidedInputs);
 $('symbols').onchange=()=>{updateStrategyScopeNote();refreshConfigValidity();};
-$('strategy').onchange=()=>{updateStrategyScopeNote();refreshConfigValidity();};
+$('strategy').onchange=()=>{updateStrategyScopeNote();refreshConfigValidity();refreshGuidedInputs();};
 $('benchmark').onchange=refreshConfigValidity;
 function dataSourcesHtml(request){
  const sources=request.data_sources||[{snapshot:request.snapshot,name:'原始数据快照'}];
@@ -118,6 +146,7 @@ $('monthly-example').onclick=safe(()=>{
  if(!flows||typeof flows!=='object'||Array.isArray(flows))throw new Error('入金/提款须为 JSON 对象');
  flows.monthly=3000;
  $('flows').value=JSON.stringify(flows,null,2);$('flows').focus();
+ refreshGuidedInputs();
  notice('已填入每月入金3000，原有日期金额保留；入金与策略买入金额分别设置。');
 });
 function cashFlowPlanHtml(metadata){
@@ -184,7 +213,7 @@ function applyConfig(input){
   restoreSelect('symbols',config.symbols);
   $('preset-name').value=config.name;
   $('dataset-search').value='';filterSnapshotOptions();
-  $('kind').onchange();updateStrategyScopeNote();refreshConfigValidity();
+  $('kind').onchange();updateStrategyScopeNote();refreshGuidedInputs();refreshConfigValidity();
  }finally{restoringConfig=false;}
  return datasetSelectionError();
 }
@@ -265,7 +294,7 @@ $('config-file').onchange=safe(async e=>{
 window.addEventListener('storage',e=>{
  if(e.key?.startsWith('investment-lab.research-preset.v1:'))safe(()=>refreshPresetList())();
 });
-async function loadStrategies(){const s=await api('/strategies');const old=$('strategy').value;$('strategy').innerHTML=Object.entries(s.builtins).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')+s.custom.map(n=>`<option value="custom:${esc(n)}">Python · ${esc(n)}</option>`).join('');if(old)restoreSelect('strategy',[old]);$('custom-files').innerHTML='<option value="">新建策略</option>'+s.custom.map(n=>`<option>${esc(n)}</option>`).join('');if(configReady)refreshConfigValidity();}
+async function loadStrategies(){const s=await api('/strategies');const old=$('strategy').value;$('strategy').innerHTML=Object.entries(s.builtins).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')+s.custom.map(n=>`<option value="custom:${esc(n)}">Python · ${esc(n)}</option>`).join('');if(old)restoreSelect('strategy',[old]);$('custom-files').innerHTML='<option value="">新建策略</option>'+s.custom.map(n=>`<option>${esc(n)}</option>`).join('');refreshGuidedInputs();if(configReady)refreshConfigValidity();}
 $('kind').onchange=()=>{$('rolling-options').hidden=$('kind').value!=='rolling';$('holdout-options').hidden=$('kind').value!=='holdout';};
 $('run-form').onsubmit=safe(async e=>{e.preventDefault();const selectionError=datasetSelectionError();if(selectionError)throw new Error(selectionError);const config={start:$('start').value,end:$('end').value,symbols:[...$('symbols').selectedOptions].map(o=>o.value),initial_cash:$('cash').value,max_leverage:$('leverage').value,mode:$('mode').value,commission_bps:$('commission').value,slippage_bps:$('slippage').value,annual_interest:$('interest').value,warmup:Number($('warmup').value),cash_flows:JSON.parse($('flows').value),benchmark:$('benchmark').value||null,...JSON.parse($('advanced').value)};const chosen=$('strategy').value;const request={...(selectedSnapshotIds.length===1?{snapshot:selectedSnapshotIds[0]}:{snapshots:[...selectedSnapshotIds]}),config,strategy:chosen.startsWith('custom:')?'custom':chosen,params:JSON.parse($('params').value),kind:$('kind').value};if(chosen.startsWith('custom:'))request.strategy_file=chosen.slice(7);if(request.kind==='rolling')request.research={interval:$('interval').value,horizon:Number($('horizon').value),end_mode:$('end-mode').value};if(request.kind==='holdout')request.research={test_start:$('test-start').value,gap_sessions:Number($('gap').value)};$('run-button').disabled=true;try{const r=await api('/runs',request);currentRun=r.run_id;view('runs');await openRun(r.run_id,0,'holdout',false);}finally{$('run-button').disabled=!!datasetSelectionError();}});
 const statusNames={queued:'排队中',running:'计算中',completed:'已完成',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
@@ -279,7 +308,27 @@ $('refresh-runs').onclick=safe(loadRuns);
 function stopPolling(id){if(id&&pollingRun!==id)return;if(polling)clearInterval(polling);polling=null;pollingRun=null;}
 function poll(id=currentRun){if(!id)return;if(polling)clearInterval(polling);pollingRun=id;pollInFlight=false;const tick=safe(async()=>{if(pollInFlight||!pollingRun)return;const runId=pollingRun;pollInFlight=true;try{const d=await api('/runs/'+runId);if(pollingRun!==runId)return;const status=d.status||(d.error?'failed':'queued');if(['completed','failed','cancelled','interrupted'].includes(status)){stopPolling(runId);await loadRuns();if(currentRun===runId&&!$('view-runs').hidden){$('notice').hidden=true;await openRun(runId,currentSample,currentSection,false);}else notice(`运行 ${runId.slice(0,10)} ${statusNames[status]||status}。`);return;}if(['queued','running'].includes(status))updateProgressDisplay(runId,d);}finally{pollInFlight=false;}});polling=setInterval(tick,1800);tick();}
 function metricHtml(m){return `<div class="metrics"><div class="metric ${m.total_return>=0?'positive':'negative'}"><span>时间加权收益</span><strong>${pct(m.total_return)}</strong></div><div class="metric negative"><span>最大回撤</span><strong>${pct(m.max_drawdown)}</strong></div><div class="metric"><span>期末权益</span><strong>${num(m.final_equity)}</strong></div><div class="metric"><span>融资成本 / 费用</span><strong>${num(m.interest)} / ${num(m.fees)}</strong></div></div>`;}
-function drawChart(canvas,curve,benchmark){if(!canvas||!curve?.length)return;const rect=canvas.getBoundingClientRect(),scale=window.devicePixelRatio||1;canvas.width=Math.max(300,rect.width)*scale;canvas.height=rect.height*scale;const g=canvas.getContext('2d');g.scale(scale,scale);const w=canvas.width/scale,h=canvas.height/scale,p={l:55,r:15,t:20,b:35};const a=curve.map(r=>Number(r.twr_index));const b=benchmark?.map(r=>Number(r.twr_index))||[];let min=Math.min(...a,...b),max=Math.max(...a,...b);if(max===min){min-=.02;max+=.02;}const span=max-min;min-=span*.08;max+=span*.08;const x=i=>p.l+i/(a.length-1||1)*(w-p.l-p.r),y=v=>p.t+(max-v)/(max-min)*(h-p.t-p.b);g.font='12px Segoe UI';g.textAlign='right';for(let i=0;i<=4;i++){const val=min+(max-min)*i/4;g.strokeStyle='#e6edf6';g.beginPath();g.moveTo(p.l,y(val));g.lineTo(w-p.r,y(val));g.stroke();g.fillStyle='#7b8ba1';g.fillText(val.toFixed(2),p.l-9,y(val)+4);}g.beginPath();a.forEach((v,i)=>i?g.lineTo(x(i),y(v)):g.moveTo(x(i),y(v)));g.lineTo(x(a.length-1),h-p.b);g.lineTo(x(0),h-p.b);g.closePath();const gradient=g.createLinearGradient(0,p.t,0,h-p.b);gradient.addColorStop(0,'#4979ec30');gradient.addColorStop(1,'#4979ec02');g.fillStyle=gradient;g.fill();g.strokeStyle='#336be7';g.lineWidth=2;g.beginPath();a.forEach((v,i)=>i?g.lineTo(x(i),y(v)):g.moveTo(x(i),y(v)));g.stroke();if(b.length){g.strokeStyle='#e3a64d';g.setLineDash([5,4]);g.beginPath();b.forEach((v,i)=>{const bx=p.l+i/(b.length-1||1)*(w-p.l-p.r);i?g.lineTo(bx,y(v)):g.moveTo(bx,y(v));});g.stroke();g.setLineDash([]);}g.fillStyle='#7b8ba1';g.textAlign='left';g.fillText(curve[0].date,p.l,h-10);g.textAlign='right';g.fillText(curve.at(-1).date,w-p.r,h-10);}
+function drawChart(canvas,curve,benchmark){
+ if(!canvas||!curve?.length)return;
+ const rect=canvas.getBoundingClientRect(),scale=window.devicePixelRatio||1;
+ const cssWidth=Math.max(300,rect.width),cssHeight=rect.height;
+ canvas.width=cssWidth*scale;canvas.height=cssHeight*scale;
+ const g=canvas.getContext('2d');g.scale(scale,scale);
+ const w=canvas.width/scale,h=canvas.height/scale,p={l:55,r:15,t:20,b:35};
+ const a=curve.map(r=>r.twr_index==null?null:Number(r.twr_index));
+ const b=benchmark?.map(r=>r.twr_index==null?null:Number(r.twr_index))||[];
+ const pointLimit=Math.max(300,Math.floor((w-p.l-p.r)*2));
+ const main=InvestmentLabUI.minMaxSample(a,pointLimit),base=InvestmentLabUI.minMaxSample(b,pointLimit);
+ const bounds=InvestmentLabUI.extent([main.map(point=>point.value),base.map(point=>point.value)]);if(!bounds)return;
+ let min=bounds.min,max=bounds.max;if(max===min){min-=.02;max+=.02;}
+ const span=max-min;min-=span*.08;max+=span*.08;
+ const x=(i,length)=>p.l+i/(length-1||1)*(w-p.l-p.r),y=v=>p.t+(max-v)/(max-min)*(h-p.t-p.b);
+ g.font='12px Segoe UI';g.textAlign='right';
+ for(let i=0;i<=4;i++){const val=min+(max-min)*i/4;g.strokeStyle='#e6edf6';g.beginPath();g.moveTo(p.l,y(val));g.lineTo(w-p.r,y(val));g.stroke();g.fillStyle='#7b8ba1';g.fillText(val.toFixed(2),p.l-9,y(val)+4);}
+ if(main.length){g.beginPath();main.forEach((point,i)=>i?g.lineTo(x(point.index,a.length),y(point.value)):g.moveTo(x(point.index,a.length),y(point.value)));g.lineTo(x(main.at(-1).index,a.length),h-p.b);g.lineTo(x(main[0].index,a.length),h-p.b);g.closePath();const gradient=g.createLinearGradient(0,p.t,0,h-p.b);gradient.addColorStop(0,'#4979ec30');gradient.addColorStop(1,'#4979ec02');g.fillStyle=gradient;g.fill();g.strokeStyle='#336be7';g.lineWidth=2;g.beginPath();main.forEach((point,i)=>i?g.lineTo(x(point.index,a.length),y(point.value)):g.moveTo(x(point.index,a.length),y(point.value)));g.stroke();}
+ if(base.length){g.strokeStyle='#e3a64d';g.setLineDash([5,4]);g.beginPath();base.forEach((point,i)=>i?g.lineTo(x(point.index,b.length),y(point.value)):g.moveTo(x(point.index,b.length),y(point.value)));g.stroke();g.setLineDash([]);}
+ g.fillStyle='#7b8ba1';g.textAlign='left';g.fillText(curve[0].date,p.l,h-10);g.textAlign='right';g.fillText(curve.at(-1).date,w-p.r,h-10);
+}
 async function retryWithReference(request){
  const button=$('retry-reference');button.disabled=true;
  try{

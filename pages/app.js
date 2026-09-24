@@ -110,7 +110,70 @@ function restoreDraft() {
     selectedIds = Array.isArray(draft.selectedIds) ? draft.selectedIds : [];
     selectedSymbols = Array.isArray(draft.selectedSymbols) ? draft.selectedSymbols : [];
   } catch (_) { /* A damaged draft falls back to safe form defaults. */ }
+  refreshGuidedInputs();
 }
+
+const strategyHelp = {
+  buy_hold: '买入持有：首次满足数据与成交条件时建立目标仓位，之后持有。目标仓位等高级参数可在下方 JSON 中调整。',
+  dca: '定期投入：每月首个交易日尝试按“每次买入金额”下单；每月自动入金是另一回事，只给账户补充现金。',
+  monthly_equal_weight: '月度定投与动态等权：首次配置及月度检查时用可用现金优先补低配标的；可选择是否在权重偏离时卖出再平衡。',
+  moving_average: '均线：比较已知收盘价与历史均线，达到条件后建立或退出目标仓位；窗口长度可在高级策略参数中调整。',
+  drawdown_buy: '回撤买入：价格相对历史窗口高点跌到设定阈值时建立目标仓位；窗口和回撤阈值在高级策略参数中调整。',
+  rotation: '同市场轮动：按历史动量在所选标的中选择领先者，每月检查；多标的会共用同一账户。',
+  leverage_rebalance: '杠杆再平衡：每日尝试恢复目标杠杆，融资、费用及成交限制会影响结果；请谨慎检查假设。',
+  futures_roll: '月份合约换月：按你预先提供的固定日期安排换月，不会使用未来成交量挑选合约。',
+  cash: '持有现金：不下买单，可用来核对资金流、区间和结果展示。',
+};
+
+function refreshGuidedInputs() {
+  const strategy = $('#strategy').value;
+  $('#strategy-help').textContent = strategyHelp[strategy] || '当前策略可在高级设置的 JSON 参数中配置。';
+  $('#dca-amount-row').hidden = strategy !== 'dca';
+  $('#equal-weight-mode-row').hidden = strategy !== 'monthly_equal_weight';
+  const errors = [];
+  try {
+    if (document.activeElement !== $('#monthly-deposit-guide')) $('#monthly-deposit-guide').value = InvestmentLabUI.readAmount($('#flows').value, 'monthly', '资金流');
+    $('#monthly-deposit-guide').disabled = false;
+  } catch (error) { $('#monthly-deposit-guide').disabled = true; errors.push(error.message); }
+  try {
+    if (document.activeElement !== $('#dca-amount-guide')) $('#dca-amount-guide').value = InvestmentLabUI.readAmount($('#params').value, 'amount', '策略参数') || '1000';
+    if (document.activeElement !== $('#equal-weight-mode-guide')) $('#equal-weight-mode-guide').value = InvestmentLabUI.readChoice($('#params').value, 'portfolio_mode', 'rebalance', ['rebalance', 'no_rebalance'], '策略参数');
+    $('#dca-amount-guide').disabled = false;
+    $('#equal-weight-mode-guide').disabled = false;
+  } catch (error) {
+    $('#dca-amount-guide').disabled = true;
+    $('#equal-weight-mode-guide').disabled = true;
+    errors.push(error.message);
+  }
+  $('#guide-status').textContent = errors.length ? `${errors.join(' ')} 请展开高级设置修正 JSON。` : '上方常用输入会写入下方参数并保留其他内容；特殊日期仍可在高级 JSON 中填写。';
+  $('#guide-status').classList.toggle('guide-error', errors.length > 0);
+}
+
+function writeGuidedAmount(inputId, textareaId, key, label) {
+  try {
+    const input = $(`#${inputId}`);
+    $(`#${textareaId}`).value = InvestmentLabUI.writeAmount($(`#${textareaId}`).value, key, input.value, label);
+    $(`#${textareaId}`).dispatchEvent(new Event('input', {bubbles:true}));
+  } catch (error) {
+    $('#guide-status').textContent = error.message;
+    $('#guide-status').classList.add('guide-error');
+  }
+}
+
+$('#monthly-deposit-guide').addEventListener('input', () => writeGuidedAmount('monthly-deposit-guide', 'flows', 'monthly', '资金流'));
+$('#dca-amount-guide').addEventListener('input', () => writeGuidedAmount('dca-amount-guide', 'params', 'amount', '策略参数'));
+$('#monthly-deposit-guide').addEventListener('blur', refreshGuidedInputs);
+$('#dca-amount-guide').addEventListener('blur', refreshGuidedInputs);
+$('#equal-weight-mode-guide').addEventListener('change', () => {
+  try {
+    $('#params').value = InvestmentLabUI.writeChoice($('#params').value, 'portfolio_mode', $('#equal-weight-mode-guide').value,
+      ['rebalance', 'no_rebalance'], '策略参数');
+    $('#params').dispatchEvent(new Event('input', {bubbles:true}));
+  } catch (error) { $('#guide-status').textContent = error.message; $('#guide-status').classList.add('guide-error'); }
+});
+$('#strategy').addEventListener('change', refreshGuidedInputs);
+$('#flows').addEventListener('input', refreshGuidedInputs);
+$('#params').addEventListener('input', refreshGuidedInputs);
 
 async function refreshStorage() {
   packages = await listStore('snapshots');
@@ -154,11 +217,12 @@ function updateSymbols() {
   const securities = new Map();
   const calendars = [];
   for (const record of records) {
-    const packageData = JSON.parse(record.packageJson);
-    for (const [symbol, security] of Object.entries(packageData.manifest.securities || {})) {
+    const {catalog, migrated} = InvestmentLabUI.snapshotCatalog(record);
+    if (migrated) putStore('snapshots', record).catch(() => {});
+    for (const [symbol, security] of Object.entries(catalog.securities || {})) {
       if (!securities.has(symbol)) securities.set(symbol, security);
     }
-    const sessions = packageData.manifest.sessions || [];
+    const sessions = catalog.sessions || [];
     if (sessions.length) calendars.push({first:sessions[0], last:sessions[sessions.length-1], sessions});
   }
   const intersectionStart = calendars.length ? calendars.map(item => item.first).sort().at(-1) : '';
@@ -221,10 +285,12 @@ function metricCards(metrics, currency) {
 
 function equityChart(curve) {
   if (!curve?.length) return '';
-  const values = curve.map(row => Number(row.equity)).filter(Number.isFinite);
-  if (!values.length) return '';
-  const low = Math.min(...values), high = Math.max(...values), range = high-low || 1;
-  const points = values.map((value,index) => `${(index/(Math.max(1,values.length-1))*640).toFixed(1)},${(176-(value-low)/range*156).toFixed(1)}`).join(' ');
+  const values = curve.map(row => row.equity == null ? null : Number(row.equity));
+  const samples = InvestmentLabUI.minMaxSample(values, 1200);
+  const bounds = InvestmentLabUI.extent([samples.map(point => point.value)]);
+  if (!bounds || !samples.length) return '';
+  const range = bounds.max-bounds.min || 1;
+  const points = samples.map(({index,value}) => `${(index/(Math.max(1,values.length-1))*640).toFixed(1)},${(176-(value-bounds.min)/range*156).toFixed(1)}`).join(' ');
   return `<div class="chart-wrap"><svg viewBox="0 0 640 190" role="img" aria-label="账户权益曲线"><polyline points="${points}" fill="none" stroke="#1478e8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="chart-caption"><span>${escapeHtml(curve[0].date)}</span><span>${escapeHtml(curve[curve.length-1].date)}</span></div></div>`;
 }
 
@@ -251,10 +317,10 @@ function renderResult(result) {
 async function importPackageJson(packageJson, metadata = {}) {
   const verifiedResponse = await workerRequest('verify', {packageJson});
   const verified = verifiedResponse.value;
-  const data = JSON.parse(packageJson);
+  const catalog = {securities:verified.securities, sessions:verified.sessions};
   const record = {id:verified.snapshot_id, name:verified.name, synthetic:verified.synthetic,
-    source:verified.source, rows:verified.rows, first:data.manifest.sessions[0] || '',
-    last:data.manifest.sessions[data.manifest.sessions.length-1] || '', imported:new Date().toISOString(), packageJson};
+    source:verified.source, rows:verified.rows, first:catalog.sessions[0] || '',
+    last:catalog.sessions.at(-1) || '', catalog, imported:new Date().toISOString(), packageJson};
   await putStore('snapshots', record);
   selectedIds = [...new Set([...selectedIds, record.id])];
   selectedSymbols = [];
@@ -308,7 +374,7 @@ $('#export-backup').addEventListener('click', async () => {
   const button = $('#export-backup'); button.disabled = true;
   try {
     const backup = {format:'investment-lab-browser-backup', format_version:1, created:new Date().toISOString(),
-      snapshots:packages.map(({id,name,synthetic,source,rows,first,last,imported,packageJson})=>({id,name,synthetic,source,rows,first,last,imported,packageJson})),
+      snapshots:packages.map(({id,name,synthetic,source,rows,first,last,catalog,imported,packageJson})=>({id,name,synthetic,source,rows,first,last,catalog,imported,packageJson})),
       runs};
     if (JSON.stringify(backup).length > 128 * 1024 * 1024) throw new Error('本机备份超过128 MiB，请先删除不需要的运行记录或分别保存快照。');
     downloadBlob(await gzipText(JSON.stringify(backup)), 'investment-lab-browser-backup.json.gz');
@@ -327,6 +393,9 @@ $('#backup-file').addEventListener('change', async event => {
     for (const record of backup.snapshots) {
       const verified = await workerRequest('verify', {packageJson:record.packageJson});
       if (verified.value.snapshot_id !== record.id) throw new Error('备份中的快照编号与数据不匹配。');
+      record.catalog = {securities:verified.value.securities, sessions:verified.value.sessions};
+      record.first = record.catalog.sessions[0] || '';
+      record.last = record.catalog.sessions.at(-1) || '';
       await putStore('snapshots', record);
     }
     for (const run of backup.runs) if (run && typeof run.id === 'string' && typeof run.resultJson === 'string') await putStore('runs', run);
