@@ -28,7 +28,7 @@
 
     <section class="panel data-panel" aria-labelledby="data-title">
       <div class="section-heading"><div><p class="eyebrow">01 · 固定研究输入</p><h2 id="data-title">数据快照</h2></div><span id="storage-label" class="muted">正在读取本机存储…</span></div>
-      <p class="help">选择从投资研究室导出的 `.json.gz` 文件。快照会保存在此网站地址对应的浏览器存储中；不同设备或浏览器需要分别导入。</p>
+      <p class="help">导入你有权用于研究的 `.json.gz` 快照。网站不会读取本机或其他用户的行情文件；分享快照前请确认数据源许可允许再分发。快照保存在此网站地址对应的浏览器存储中，不同设备或浏览器需要分别导入。</p>
       <div class="toolbar">
         <label class="file-picker">导入快照<input id="package-file" type="file" accept=".gz,application/gzip"></label>
         <button id="demo-package" class="secondary">添加 5 日合成演示</button>
@@ -44,7 +44,7 @@
       <div class="section-heading"><div><p class="eyebrow">02 · 研究假设</p><h2 id="research-title">回测配置</h2></div><span class="muted">配置草稿自动保存在此浏览器</span></div>
       <form id="research-form">
         <div class="field-grid">
-          <label>策略<select id="strategy"><option value="buy_hold">买入持有</option><option value="dca">定期投入</option><option value="moving_average">均线</option><option value="drawdown_buy">回撤买入</option><option value="rotation">同市场轮动</option><option value="leverage_rebalance">杠杆再平衡</option><option value="futures_roll">月份合约换月</option><option value="cash">持有现金</option></select></label>
+          <label>策略<select id="strategy"><option value="buy_hold">买入持有</option><option value="dca">定期投入</option><option value="monthly_equal_weight">月度定投与动态等权</option><option value="moving_average">均线</option><option value="drawdown_buy">回撤买入</option><option value="rotation">同市场轮动</option><option value="leverage_rebalance">杠杆再平衡</option><option value="futures_roll">月份合约换月</option><option value="cash">持有现金</option></select></label>
           <label>研究方式<select id="kind"><option value="single">单次回测</option><option value="rolling">滚动起点回测</option><option value="holdout">开发区间 / 留出验证</option></select></label>
           <label>开始日期<input id="start" type="date" required></label>
           <label>结束日期<input id="end" type="date" required></label>
@@ -60,7 +60,7 @@
             <label>最低佣金<input id="minimum-commission" type="number" min="0" step="any" value="0"></label>
             <label>滑点（基点）<input id="slippage" type="number" min="0" step="any" value="5"></label>
             <label>年融资利率<input id="interest" type="number" min="0" step="0.01" value="0.06"></label>
-            <label>策略参数（JSON）<textarea id="params" rows="3">{"weight":0.95}</textarea></label>
+            <label>策略参数（JSON）<textarea id="params" rows="3">{"weight":0.95}</textarea><span class="help">“月度定投与动态等权”支持 portfolio_mode（rebalance / no_rebalance）与 month_end_dates（指定检查日期数组；留空时用下月首个交易日代理月末）。</span></label>
             <label>入金 / 提款（JSON）<textarea id="flows" rows="3">{}</textarea><span class="help">每月定期投入示例：{"monthly":3000}。每月在本回测期首个交易日入金，不自动下单。</span></label>
           </div>
           <div id="rolling-fields" class="field-grid" hidden>

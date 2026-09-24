@@ -15,6 +15,9 @@ def test_pages_build_contains_allowlisted_app_and_engine_without_local_data(tmp_
     assert not (output / "local_config").exists()
     assert not (output / "runs").exists()
     assert not (output / "user_strategies").exists()
+    assert 'value="monthly_equal_weight"' in (output / "index.html").read_text(encoding="utf-8")
+    assert "monthly_equal_weight" in (output / "worker.js").read_text(encoding="utf-8")
+    assert "monthly_equal_weight" in (output / "runtime/investment_lab/strategies/examples.py").read_text(encoding="utf-8")
     assert len(manifest["files"]) == 4 + 1 + len(RUNTIME_FILES)
 
 

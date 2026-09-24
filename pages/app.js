@@ -422,6 +422,18 @@ $('#kind').addEventListener('change', () => {
   $('#holdout-fields').hidden = $('#kind').value !== 'holdout';
 });
 
+$('#strategy').addEventListener('change', () => {
+  if ($('#strategy').value === 'monthly_equal_weight') {
+    try {
+      const current = JSON.parse($('#params').value);
+      if (current && Object.keys(current).length === 1 && Number(current.weight) === 0.95) {
+        $('#params').value = JSON.stringify({portfolio_mode:'rebalance', month_end_dates:[]});
+      }
+    } catch (_) { /* Keep invalid or user-edited JSON visible for correction. */ }
+  }
+  saveDraft();
+});
+
 for (const id of FIELD_IDS) $(`#${id}`).addEventListener('input', saveDraft);
 for (const id of FIELD_IDS) $(`#${id}`).addEventListener('change', saveDraft);
 

@@ -126,7 +126,7 @@ bars = [row for package in packages for row in package['bars']]
 config = Config(**request['config'])
 validate_composed_selection(manifest, config)
 strategy_name = request['strategy']
-if strategy_name not in ('buy_hold', 'dca', 'moving_average', 'drawdown_buy', 'rotation', 'leverage_rebalance', 'futures_roll', 'cash'):
+if strategy_name not in ('buy_hold', 'dca', 'monthly_equal_weight', 'moving_average', 'drawdown_buy', 'rotation', 'leverage_rebalance', 'futures_roll', 'cash'):
     raise ValueError('浏览器版只支持内置策略。')
 params = request.get('params', {})
 research = request.get('research', {})

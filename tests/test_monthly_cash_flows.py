@@ -74,6 +74,57 @@ def test_monthly_deposits_are_not_profit_and_are_available_to_dca(monthly_data, 
     assert cash["metrics"]["trades"] == 0 and cash["metrics"]["net_profit"] == 0
 
 
+def test_monthly_equal_weight_strategy_handles_multiple_symbols_and_monthly_deposits(monthly_data, config):
+    payload = deepcopy(monthly_data)
+    payload["securities"]["B"] = {**payload["securities"]["A"], "name": "第二项样本"}
+    payload["bars"].extend({**bar, "symbol": "B"} for bar in monthly_data["bars"])
+    cfg = replace(
+        config,
+        end="2024-03-04",
+        symbols=["A", "B"],
+        cash_flows={"monthly": 100},
+    )
+    manifest = {key: value for key, value in payload.items() if key != "bars"}
+    result = simulate(manifest, payload["bars"], cfg, Builtin("monthly_equal_weight"), {
+        "portfolio_mode": "rebalance",
+        "month_end_dates": [],
+    })
+
+    assert {trade["symbol"] for trade in result["trades"]} == {"A", "B"}
+    assert list(result["metadata"]["cash_flows"]) == ["2024-01-04", "2024-02-01", "2024-03-01"]
+    assert result["metrics"]["net_flows"] == 300
+
+
+def test_monthly_equal_weight_strategy_rebalances_on_explicit_review_date(monthly_data, config):
+    payload = deepcopy(monthly_data)
+    payload["securities"]["B"] = {**payload["securities"]["A"], "name": "第二项样本"}
+    second_asset_bars = []
+    for bar in monthly_data["bars"]:
+        price = "20" if bar["date"] >= "2024-02-01" else "10"
+        second_asset_bars.append({
+            **bar,
+            "symbol": "B",
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "vwap_value": price,
+            "amount": str(Decimal(price) * Decimal(bar["volume"])),
+        })
+    payload["bars"].extend(second_asset_bars)
+    cfg = replace(config, end="2024-03-04", symbols=["A", "B"], cash_flows={"monthly": 100})
+    manifest = {key: value for key, value in payload.items() if key != "bars"}
+    result = simulate(manifest, payload["bars"], cfg, Builtin("monthly_equal_weight"), {
+        "portfolio_mode": "rebalance",
+        "month_end_dates": ["2024-02-01"],
+    })
+
+    review_orders = [order for order in result["orders"] if order["signal_date"] == "2024-02-01"]
+    assert len(review_orders) == 2
+    assert all("指定日期检查" in order["reason"] for order in review_orders)
+    assert {trade["symbol"] for trade in result["trades"] if trade["date"] == "2024-02-02"} == {"A", "B"}
+
+
 def test_rolling_regenerates_months_instead_of_shifting_monthly_offsets(monthly_data, config):
     manifest = {k: v for k, v in monthly_data.items() if k != "bars"}
     cfg = replace(config, end="2024-03-04", cash_flows={"monthly": 100, "2024-01-05": 7})
