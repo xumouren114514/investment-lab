@@ -4,6 +4,8 @@
 
 ## 浏览器版
 
+**在线试用：**[投资研究室浏览器版](https://xumouren114514.github.io/investment-lab/)。
+
 浏览器版从数据快照包导入行情，在 Web Worker 中运行固定版本的 Python 引擎与内置策略，并将数据、配置和结果保存在当前浏览器。可选择多份快照、配置费用/现金流/研究区间、查看进度与结果，并导出本机备份。页面不会上传用户的快照、策略或回测结果；清除该网站的浏览器数据会删除本机保存内容。
 
 它不会运行用户上传的任意 Python，也没有云账户、跨设备同步或共享存储。请核实行情数据的授权范围；研究输出取决于数据质量及交易假设，不代表实际成交或投资建议。
@@ -15,7 +17,7 @@ python scripts/build_pages_site.py --output build/pages
 python -m http.server 8766 --directory build/pages
 ```
 
-GitHub Actions 配置见 `.github/workflows/pages.yml`。首次部署时，需在 GitHub 仓库设置中将 Pages 来源选择为 GitHub Actions。
+GitHub Pages 已配置为 GitHub Actions 来源；推送 `main` 后会自动构建并部署浏览器版。发布工作流和逐步更新方式见 `.github/workflows/pages.yml`、`docs/HOSTING.md` 与 `scripts/publish_update.ps1`。
 
 ## Windows 本机版
 
