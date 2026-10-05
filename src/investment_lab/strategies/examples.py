@@ -253,22 +253,57 @@ def validate_params(name, params, symbols=()):
     return values
 
 
-def _closes(ctx, symbol, count):
-    values = ctx.history(symbol, count, field="close")
-    if len(values) != count or any(value is None or dec(value) <= 0 for value in values):
+def _note(ctx, strategy, code, message, **details):
+    """The engine bounds diagnostics; legacy/test contexts need not provide note()."""
+    callback = getattr(ctx, "note", None)
+    if callable(callback):
+        callback(code, message, strategy=strategy, **details)
+
+
+def _history_values(ctx, symbol, count, strategy, field="close", require_full=True,
+                    action="skip_signal"):
+    values = ctx.history(symbol, count) if field is None else ctx.history(symbol, count, field=field)
+    details = {"symbol": symbol, "required_history": count, "available_history": len(values),
+               "missing_fields": [], "action": action}
+    if len(values) < count:
+        partial = not require_full and bool(values)
+        message = ("回撤观察窗口不足，继续基础定投且不加码" if action == "base_purchase"
+                   else "观察窗口不足，跳过指标信号" if not partial
+                   else "兼容旧回撤策略：按已有的部分历史计算")
+        if not values and action == "partial_window_signal":
+            details["action"] = "skip_signal"
+        _note(ctx, strategy, "partial_history" if partial else "insufficient_history",
+              message, **details)
+        if require_full or not values:
+            return None
+    if any(value is None or dec(value) <= 0 for value in values):
+        details["missing_fields"] = [field or getattr(ctx, "_default_field", "history_default")]
+        message = ("回撤价格缺失或非正，继续基础定投且不加码" if action == "base_purchase"
+                   else "所需历史价格缺失或非正，跳过指标信号")
+        _note(ctx, strategy, "missing_price_fields", message, **details)
         return None
-    return [float(value) for value in values]
+    return values
 
 
-def _bars(ctx, symbol, count):
+def _closes(ctx, symbol, count, strategy="indicator"):
+    values = _history_values(ctx, symbol, count, strategy)
+    return [float(value) for value in values] if values is not None else None
+
+
+def _bars(ctx, symbol, count, strategy="indicator"):
     values = ctx.bars(symbol, count)
     if len(values) != count:
+        _note(ctx, strategy, "insufficient_history", "观察窗口不足，跳过指标信号",
+              symbol=symbol, required_history=count, available_history=len(values), missing_fields=[])
         return None
+    missing = set()
     for row in values:
-        if any(row.get(field) is None for field in ("high", "low", "close")):
-            return None
-        if dec(row["high"]) <= 0 or dec(row["low"]) <= 0 or dec(row["close"]) <= 0:
-            return None
+        missing.update(field for field in ("high", "low", "close")
+                       if row.get(field) is None or dec(row[field]) <= 0)
+    if missing:
+        _note(ctx, strategy, "missing_price_fields", "指标所需 OHLC 字段缺失或非正，跳过信号",
+              symbol=symbol, required_history=count, available_history=len(values), missing_fields=sorted(missing))
+        return None
     return values
 
 
@@ -373,8 +408,8 @@ class Builtin:
             if symbol and _scheduled(ctx, state, "last_period", frequency):
                 amount = dec(p.get("amount", 1000))
                 window = int(p.get("window", 60))
-                prices = ctx.history(symbol, window, field="close")
-                if len(prices) == window and all(value is not None and dec(value) > 0 for value in prices):
+                prices = _history_values(ctx, symbol, window, self.name, action="base_purchase")
+                if prices is not None:
                     peak = max(dec(value) for value in prices)
                     drawdown = dec(1) - dec(prices[-1]) / peak
                     if drawdown >= dec(p.get("drawdown_threshold", "0.1")):
@@ -388,23 +423,25 @@ class Builtin:
                 _target_allocation(ctx, symbols, targets, dec(p.get("rebalance_threshold", "0.05")), "按预设目标比例再平衡")
         elif self.name == "moving_average":
             window = int(p.get("window", 20))
-            history = ctx.history(symbol, window)
-            if symbol and len(history) == window and all(value is not None for value in history):
+            history = _history_values(ctx, symbol, window, self.name, field=None) if symbol else None
+            if history is not None:
                 target = weight if history[-1] > sum(history) / window else 0
                 ctx.order_target_weight(symbol, target, "已知价格与历史均线比较")
         elif self.name == "ema_crossover":
             fast, slow = int(p.get("fast_window", 12)), int(p.get("slow_window", 26))
-            values = _closes(ctx, symbol, slow + 1) if symbol else None
+            values = _closes(ctx, symbol, slow + 1, self.name) if symbol else None
             if values:
                 previous_fast, previous_slow = _ema(values[:-1], fast), _ema(values[:-1], slow)
                 current_fast, current_slow = _ema(values, fast), _ema(values, slow)
                 if previous_fast is not None and previous_slow is not None and current_fast is not None and current_slow is not None:
                     target = weight if current_fast > current_slow else 0
-                    if (previous_fast <= previous_slow < current_fast) or (previous_fast >= previous_slow > current_fast):
+                    crossed_up = previous_fast <= previous_slow and current_fast > current_slow
+                    crossed_down = previous_fast >= previous_slow and current_fast < current_slow
+                    if crossed_up or crossed_down:
                         ctx.order_target_weight(symbol, target, "EMA 短长均线交叉")
         elif self.name == "macd":
             fast, slow, signal = int(p.get("fast_window", 12)), int(p.get("slow_window", 26)), int(p.get("signal_window", 9))
-            values = _closes(ctx, symbol, slow + signal + 2) if symbol else None
+            values = _closes(ctx, symbol, slow + signal + 2, self.name) if symbol else None
             if values:
                 fast_values, slow_values = _ema_series(values, fast), _ema_series(values, slow)
                 macd_values = [a - b if a is not None and b is not None else None for a, b in zip(fast_values, slow_values)]
@@ -415,11 +452,13 @@ class Builtin:
                     current_signal, previous_signal = signal_values[-1], signal_values[-2]
                     if current_signal is not None and previous_signal is not None:
                         target = weight if current_macd > current_signal else 0
-                        if (previous_macd <= previous_signal < current_macd) or (previous_macd >= previous_signal > current_macd):
+                        crossed_up = previous_macd <= previous_signal and current_macd > current_signal
+                        crossed_down = previous_macd >= previous_signal and current_macd < current_signal
+                        if crossed_up or crossed_down:
                             ctx.order_target_weight(symbol, target, "MACD 线与信号线交叉")
         elif self.name == "time_series_momentum":
             window = int(p.get("window", 120))
-            values = _closes(ctx, symbol, window + 1) if symbol else None
+            values = _closes(ctx, symbol, window + 1, self.name) if symbol else None
             if values:
                 momentum = values[-1] / values[0] - 1
                 target = weight if momentum > float(dec(p.get("threshold", 0))) else 0
@@ -429,18 +468,23 @@ class Builtin:
             window, top_n = int(p.get("window", 20)), int(p.get("top_n", 1))
             scores = {}
             for candidate in symbols:
-                prices = _closes(ctx, candidate, window)
+                prices = _history_values(ctx, candidate, window, self.name, field=None)
                 if prices:
-                    scores[candidate] = prices[-1] / prices[0] - 1
+                    scores[candidate] = dec(prices[-1]) / dec(prices[0]) - 1
             if scores and _scheduled(ctx, state, "last_period", p.get("frequency", "monthly")):
-                winners = sorted(scores, key=lambda candidate: (-scores[candidate], candidate))[:top_n]
+                # Stable sorting preserves the original selected-symbol tie break.
+                winners = sorted(scores, key=lambda candidate: -scores[candidate])[:top_n]
                 each_weight = weight / dec(top_n)
-                targets = {candidate: each_weight if candidate in winners else dec(0) for candidate in symbols}
-                _target_allocation(ctx, symbols, targets, dec(0), "按周期历史动量轮动")
+                period_label = "月度" if p.get("frequency", "monthly") == "monthly" else "周期"
+                for candidate in symbols:
+                    if candidate not in winners:
+                        ctx.order_target_weight(candidate, 0, f"{period_label}轮动退出")
+                for candidate in winners:
+                    ctx.order_target_weight(candidate, each_weight, f"{period_label}历史动量轮动")
         elif self.name == "donchian_breakout":
             entry = int(p.get("entry_window", 20))
             exit_window = int(p.get("exit_window", 10))
-            rows = _bars(ctx, symbol, max(entry, exit_window) + 1) if symbol else None
+            rows = _bars(ctx, symbol, max(entry, exit_window) + 1, self.name) if symbol else None
             if rows:
                 today = rows[-1]
                 previous = rows[:-1]
@@ -453,14 +497,15 @@ class Builtin:
                     ctx.order_target_weight(symbol, 0, "收盘跌破此前唐奇安退出下轨")
         elif self.name == "drawdown_buy":
             window = int(p.get("window", 60))
-            history = ctx.history(symbol, window, field="close") if symbol else []
-            if len(history) == window and all(value is not None and dec(value) > 0 for value in history):
+            history = _history_values(ctx, symbol, window, self.name, field=None, require_full=False,
+                                      action="partial_window_signal") if symbol else None
+            if history:
                 if dec(history[-1]) / max(dec(value) for value in history) - 1 <= -dec(p.get("threshold", "0.1")):
                     ctx.order_target_weight(symbol, weight, "历史高点回撤达到阈值")
         elif self.name == "drawdown_ladder":
             window = int(p.get("window", 120))
-            prices = ctx.history(symbol, window, field="close") if symbol else []
-            if len(prices) == window and all(value is not None and dec(value) > 0 for value in prices):
+            prices = _history_values(ctx, symbol, window, self.name) if symbol else None
+            if prices is not None:
                 peak = max(dec(value) for value in prices)
                 close = dec(prices[-1])
                 drawdown = dec(1) - close / peak
@@ -476,7 +521,7 @@ class Builtin:
                         state["steps"] = tier
         elif self.name == "rsi_mean_reversion":
             window = int(p.get("window", 14))
-            values = _closes(ctx, symbol, window + 1) if symbol else None
+            values = _closes(ctx, symbol, window + 1, self.name) if symbol else None
             current = _rsi(values, window) if values else None
             if current is not None:
                 if current <= float(dec(p.get("entry", 30))):
@@ -485,7 +530,7 @@ class Builtin:
                     ctx.order_target_weight(symbol, 0, "RSI 回升至退出线")
         elif self.name == "bollinger_mean_reversion":
             window = int(p.get("window", 20))
-            values = _closes(ctx, symbol, window) if symbol else None
+            values = _closes(ctx, symbol, window, self.name) if symbol else None
             if values:
                 middle = sum(values) / window
                 deviation = pstdev(values)
@@ -496,7 +541,7 @@ class Builtin:
                     ctx.order_target_weight(symbol, 0, "收盘回到布林中轨")
         elif self.name == "stochastic_mean_reversion":
             window = int(p.get("window", 14))
-            rows = _bars(ctx, symbol, window) if symbol else None
+            rows = _bars(ctx, symbol, window, self.name) if symbol else None
             if rows:
                 highest = max(dec(row["high"]) for row in rows)
                 lowest = min(dec(row["low"]) for row in rows)
@@ -508,7 +553,7 @@ class Builtin:
                         ctx.order_target_weight(symbol, 0, "随机指标回升至退出线")
         elif self.name == "atr_trend_stop":
             trend_window, atr_window = int(p.get("trend_window", 20)), int(p.get("atr_window", 14))
-            rows = _bars(ctx, symbol, max(trend_window, atr_window) + 1) if symbol else None
+            rows = _bars(ctx, symbol, max(trend_window, atr_window) + 1, self.name) if symbol else None
             if rows:
                 close = float(dec(rows[-1]["close"]))
                 trend = sum(float(dec(row["close"])) for row in rows[-trend_window:]) / trend_window
@@ -529,7 +574,7 @@ class Builtin:
                     state["active"], state["peak"] = True, close
         elif self.name == "volatility_target":
             window = int(p.get("window", 20))
-            values = _closes(ctx, symbol, window + 1) if symbol else None
+            values = _closes(ctx, symbol, window + 1, self.name) if symbol else None
             volatility = _annualized_volatility(values, window)
             if volatility is not None:
                 target_vol = float(dec(p.get("target_volatility", "0.15")))
@@ -538,11 +583,12 @@ class Builtin:
                 ctx.order_target_weight(symbol, target, "按已知实现波动率缩放目标仓位")
         elif self.name == "inverse_volatility":
             symbols = _selected_symbols(ctx)
-            if _scheduled(ctx, state, "last_period", p.get("frequency", "monthly")):
+            period = _period_key(ctx.date, p.get("frequency", "monthly"))
+            if state.get("last_period") != period:
                 window = int(p.get("window", 60))
                 volatilities = {}
                 for candidate in symbols:
-                    values = _closes(ctx, candidate, window + 1)
+                    values = _closes(ctx, candidate, window + 1, self.name)
                     volatility = _annualized_volatility(values, window)
                     if volatility is None:
                         volatilities = {}
@@ -554,6 +600,7 @@ class Builtin:
                     cap = float(dec(p.get("max_weight", "0.5")))
                     targets = {candidate: dec(min(cap, value / total)) for candidate, value in inverse.items()}
                     _target_allocation(ctx, symbols, targets, dec(0), "按滚动波动率倒数进行组合配置")
+                    state["last_period"] = period
         elif self.name == "leverage_rebalance":
             ctx.order_target_weight(symbol, dec(p.get("weight", "1.5")), "每日恢复目标杠杆，包含交易成本")
         elif self.name == "futures_roll":

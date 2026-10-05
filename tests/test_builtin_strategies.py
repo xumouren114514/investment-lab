@@ -1,4 +1,5 @@
 from copy import deepcopy
+from decimal import Decimal
 
 import pytest
 
@@ -23,7 +24,7 @@ def bar(day, close, high=None, low=None):
 
 
 class Context:
-    def __init__(self, rows, params=None, symbols=("A",), day=None):
+    def __init__(self, rows, params=None, symbols=("A",), day=None, default_field="close"):
         self.rows = {symbol: sorted((deepcopy(row) for row in rows if row["symbol"] == symbol), key=lambda x: x["date"])
                      for symbol in symbols}
         self.symbols = list(symbols)
@@ -35,10 +36,13 @@ class Context:
         self.cash = 100_000
         self.equity = 100_000
         self.orders = []
+        self.diagnostics = []
+        self._default_field = default_field
 
-    def history(self, symbol, count=20, field="close"):
+    def history(self, symbol, count=20, field=None):
         known = [row for row in self.rows.get(symbol, ()) if row["date"] <= self.date]
-        return [row.get(field) for row in known[-count:]]
+        field = field or self._default_field
+        return [Decimal(str(row[field])) if row.get(field) is not None else None for row in known[-count:]]
 
     def bars(self, symbol, count=20):
         known = [row for row in self.rows.get(symbol, ()) if row["date"] <= self.date]
@@ -53,9 +57,12 @@ class Context:
     def order_shares(self, symbol, quantity, reason):
         self.orders.append(("shares", symbol, quantity, reason))
 
+    def note(self, code, message, **details):
+        self.diagnostics.append({"date": self.date, "code": code, "message": message, **details})
 
-def run(name, rows, params, day=None, symbols=("A",)):
-    ctx = Context(rows, params, symbols, day)
+
+def run(name, rows, params, day=None, symbols=("A",), default_field="close"):
+    ctx = Context(rows, params, symbols, day, default_field)
     strategy = Builtin(name)
     strategy.initialize(ctx)
     strategy.on_session(ctx)
@@ -98,7 +105,7 @@ def test_defaults_and_parameter_ranges_are_validated_before_execution():
 @pytest.mark.parametrize(
     ("name", "prices", "params"),
     [
-        ("ema_crossover", [10, 9, 8, 7, 6, 5, 4, 3, 2, 4], {"fast_window": 2, "slow_window": 3}),
+        ("ema_crossover", [10, 9, 8, 7, 6, 5, 4, 3, 2, 5], {"fast_window": 2, "slow_window": 3}),
         ("macd", [10, 9, 8, 7, 6, 5, 4, 3, 2, 4], {"fast_window": 2, "slow_window": 3, "signal_window": 2}),
         ("rsi_mean_reversion", [100, 100, 99, 98], {"window": 2, "entry": 30, "exit": 55}),
         ("bollinger_mean_reversion", [10, 10, 10, 7], {"window": 3, "deviations": 0.5}),
@@ -145,7 +152,7 @@ def test_atr_position_size_uses_risk_budget_and_close_stop():
 
 
 def test_insufficient_warmup_and_missing_ohlc_skip_indicator_signals():
-    assert not run("drawdown_buy", days([100, 80]), {"window": 3, "threshold": 0.1}).orders
+    assert not run("time_series_momentum", days([100, 80]), {"window": 3, "threshold": 0.1}).orders
     incomplete = days([10, 10, 12])
     incomplete[-1]["high"] = None
     assert not run("donchian_breakout", incomplete, {"entry_window": 2, "exit_window": 2}).orders
@@ -160,3 +167,119 @@ def test_indicators_only_see_rows_available_on_the_decision_day():
     second = run("time_series_momentum", future, {"window": 2, "threshold": 0, "weight": 0.95}, day="2024-01-03")
     assert first.orders == second.orders
     assert second.orders and second.orders[0][2] == 0
+
+
+@pytest.mark.parametrize(("prices", "target"), [
+    # Fast remains above slow: (12,10) -> (28/3,9), no cross.
+    ([8, 8, 14, 8], None),
+    # Fast remains below slow: (8,10) -> (32/3,11), no cross.
+    ([12, 12, 6, 12], None),
+    ([12, 12, 6, 20], 0.95),  # (8,10) -> (16,15), crosses up.
+    ([8, 8, 14, 4], 0),  # (12,10) -> (20/3,7), crosses down.
+])
+def test_ema_cross_requires_both_current_lines(prices, target):
+    ctx = run("ema_crossover", days(prices), {"fast_window": 2, "slow_window": 3})
+    if target is None:
+        assert not ctx.orders
+    else:
+        assert [order[:3] for order in ctx.orders] == [("weight", "A", target)]
+
+
+@pytest.mark.parametrize(("prices", "target"), [
+    # Independent exact recurrence, fast=2, slow=3, signal=2:
+    # previous (MACD,signal)=(-97/108,-58/81), current=(157/648,-25/324).
+    ([12, 12, 6, 12, 12, 6, 12], 0.95),
+    # Reflecting prices about 12 negates both lines: a true downward cross.
+    ([12, 12, 18, 12, 12, 18, 12], 0),
+    # Previous=(1/6,1/9), current=(11/36,13/54); MACD remains above.
+    ([10, 10, 10, 10, 10, 11, 12], None),
+    # The reflected series remains below, with no crossover.
+    ([10, 10, 10, 10, 10, 9, 8], None),
+])
+def test_macd_current_line_crossing_with_independent_numeric_examples(prices, target):
+    ctx = run("macd", days(prices), {"fast_window": 2, "slow_window": 3, "signal_window": 2})
+    if target is None:
+        assert not ctx.orders
+    else:
+        assert [order[:3] for order in ctx.orders] == [("weight", "A", target)]
+
+
+def test_yearly_dca_buys_once_per_calendar_year():
+    params = {"amount": 250, "frequency": "yearly"}
+    validate_params("dca", params)
+    ctx = Context(days([10]), params)
+    strategy = Builtin("dca")
+    strategy.initialize(ctx)
+    for day in ("2024-01-02", "2024-09-30", "2025-01-02"):
+        ctx.date = day
+        strategy.on_session(ctx)
+    assert [order[:3] for order in ctx.orders] == [("value", "A", 250), ("value", "A", 250)]
+
+
+def test_drawdown_preserves_partial_window_and_default_price_basis():
+    rows = [dict(row, vwap_value=price) for row, price in zip(days([100, 110]), [100, 80])]
+    vwap = run("drawdown_buy", rows, {}, default_field="vwap_value")
+    close = run("drawdown_buy", rows, {})
+    assert [order[:3] for order in vwap.orders] == [("weight", "A", 0.95)]
+    assert not close.orders
+    assert vwap.diagnostics[0]["code"] == "partial_history"
+    assert vwap.diagnostics[0]["required_history"] == 60
+    assert vwap.diagnostics[0]["available_history"] == 2
+
+
+def test_rotation_preserves_default_price_basis_selected_ties_and_sell_first():
+    rows = [dict(row, symbol=symbol, vwap_value=price)
+            for symbol, closes, prices in (("B", [10, 30], [10, 11]), ("A", [10, 9], [10, 12]))
+            for row, price in zip(days(closes), prices)]
+    ctx = run("rotation", rows, {"window": 2}, symbols=("B", "A"), default_field="vwap_value")
+    assert [order[:3] for order in ctx.orders] == [("weight", "B", 0), ("weight", "A", 0.95)]
+    tied = [dict(row, vwap_value="10") for row in rows]
+    ctx = run("rotation", tied, {"window": 2}, symbols=("B", "A"), default_field="vwap_value")
+    assert [order[:3] for order in ctx.orders] == [("weight", "A", 0), ("weight", "B", 0.95)]
+
+
+def test_diagnostics_describe_missing_history_and_fields_without_changing_prices():
+    short = run("ema_crossover", days([10, 11]), {"fast_window": 2, "slow_window": 3})
+    assert short.diagnostics == [{"date": "2024-01-02", "code": "insufficient_history",
+        "message": "观察窗口不足，跳过指标信号", "strategy": "ema_crossover", "symbol": "A",
+        "required_history": 4, "available_history": 2, "missing_fields": [], "action": "skip_signal"}]
+    rows = days([10, 10, 12])
+    rows[-1]["high"] = None
+    missing = run("donchian_breakout", rows, {"entry_window": 2, "exit_window": 2})
+    assert not missing.orders
+    assert missing.diagnostics[0]["missing_fields"] == ["high"]
+    assert missing.diagnostics[0]["required_history"] == 3
+    rows = [dict(row, vwap_value="10") for row in days([100, 80])]
+    rows[-1]["vwap_value"] = None
+    missing = run("drawdown_buy", rows, {}, default_field="vwap_value")
+    assert not missing.orders
+    assert missing.diagnostics[-1]["missing_fields"] == ["vwap_value"]
+
+
+def test_adaptive_dca_keeps_base_purchase_when_indicator_is_not_ready():
+    ctx = run("adaptive_dca", days([100, 80]), {"amount": 250, "window": 3})
+    assert ctx.orders[0][:3] == ("value", "A", 250)
+    assert ctx.diagnostics[0]["action"] == "base_purchase"
+
+
+def test_legacy_context_without_note_can_skip_indicators():
+    ctx = Context(days([100]), {"fast_window": 2, "slow_window": 3})
+    ctx.note = None
+    strategy = Builtin("ema_crossover")
+    strategy.initialize(ctx)
+    strategy.on_session(ctx)
+    assert not ctx.orders
+
+
+def test_inverse_volatility_retries_after_warmup_in_same_period():
+    rows = days([10, 11, 12]) + [dict(row, symbol="B") for row in days([20, 21, 22])]
+    ctx = Context(rows, {"window": 2}, ("A", "B"), day="2024-01-02")
+    strategy = Builtin("inverse_volatility")
+    strategy.initialize(ctx)
+    strategy.on_session(ctx)
+    assert not ctx.orders and "last_period" not in ctx.state
+    ctx.date = "2024-01-03"
+    strategy.on_session(ctx)
+    assert len(ctx.orders) == 2 and ctx.state["last_period"] == "2024-01"
+    strategy.on_session(ctx)
+    assert len(ctx.orders) == 2

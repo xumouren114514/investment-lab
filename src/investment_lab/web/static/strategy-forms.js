@@ -24,7 +24,8 @@
     if (field.type === 'weights') {
       const supplied = value && typeof value === 'object' ? value : {};
       const equal = symbols.length ? 1 / symbols.length : 0;
-      const rows = symbols.map(symbol => `<label class="weight-row">${esc(symbol)}<input type="number" min="0" max="1" step="0.01" data-strategy-param="${esc(field.key)}" data-param-type="weights" data-symbol="${esc(symbol)}" value="${esc(supplied[symbol] ?? equal.toFixed(2))}"></label>`).join('');
+      const placeholder=Object.keys(supplied).length?'未配置（0）':`自动等权 ${(equal*100).toFixed(2)}%`;
+      const rows = symbols.map(symbol => `<label class="weight-row">${esc(symbol)}<input type="number" min="0" max="1" step="0.01" data-strategy-param="${esc(field.key)}" data-param-type="weights" data-symbol="${esc(symbol)}" value="${esc(supplied[symbol] ?? '')}" placeholder="${esc(placeholder)}"></label>`).join('');
       return `<fieldset class="strategy-weight-field"><legend>${esc(field.label)}</legend><div class="strategy-weight-list">${rows || '<span class="help">先选择至少一个可交易标的。</span>'}</div>${description}</fieldset>`;
     }
     if (field.type === 'date_list') {
@@ -52,7 +53,12 @@
       return;
     }
     const fields = entry.parameters || [];
-    host.innerHTML = `<div class="strategy-description"><strong>${esc(entry.category || '预设策略')}</strong><span>${esc(entry.description || '')}</span></div>${fields.length ? `<div class="strategy-fields">${fields.map(field => renderField(field, values || {}, symbols)).join('')}</div>` : '<p class="help">此策略无需额外参数。</p>'}<p class="help strategy-timing-note">信号只使用当前及以前可用的历史数据；订单按下一交易日模拟执行。观察窗口不足或必要字段缺失时会跳过信号，不会自动替换价格口径。</p>`;
+    const historyNote=entry.id==='adaptive_dca'
+      ?'观察窗口不足或加码判断所需数据缺失时继续按基础金额定投，不执行加码判断。'
+      :entry.id==='drawdown_buy'
+        ?'为兼容原策略，历史窗口非空时可使用已知的短窗口计算回撤；必要价格缺失时等待。'
+        :'指标观察窗口不足或必要字段缺失时等待，不会自动替换价格口径。';
+    host.innerHTML = `<div class="strategy-description"><strong>${esc(entry.category || '预设策略')}</strong><span>${esc(entry.description || '')}</span></div>${fields.length ? `<div class="strategy-fields">${fields.map(field => renderField(field, values || {}, symbols)).join('')}</div>` : '<p class="help">此策略无需额外参数。</p>'}<p class="help strategy-timing-note">信号只使用当前及以前可用的历史数据；订单按下一交易日模拟执行。${esc(historyNote)}</p>`;
   }
 
   function validDate(value) {
@@ -87,7 +93,7 @@
           let total = 0;
           for (const [symbol, weight] of Object.entries(value)) {
             const numeric = Number(weight);
-            if ((symbols.length && !symbols.includes(symbol)) || !Number.isFinite(numeric) || numeric < 0 || numeric > 1) throw new Error(`${symbol} 的目标比例无效，或标的未被选中。`);
+            if (!symbols.includes(symbol) || !Number.isFinite(numeric) || numeric < 0 || numeric > 1) throw new Error(`${symbol} 的目标比例无效，或标的未被选中。`);
             total += numeric;
           }
           if (total > Number(field.maxTotal ?? 1) + 1e-8) throw new Error('目标比例总和不能超过100%。');
@@ -115,9 +121,11 @@
       for (const field of entry.parameters || []) {
         const inputs = [...host.querySelectorAll('[data-strategy-param]')].filter(input => input.dataset.strategyParam === field.key);
         if (field.type === 'weights') {
-          const weights = {};
+          // Keep keys that have become unselected so validation can explain the
+          // mismatch. Changing the selection must never silently erase a weight.
+          const weights = {...(previous[field.key] || {})};
           for (const input of inputs) {
-            if (input.value === '') continue;
+            if (input.value === '') { delete weights[input.dataset.symbol]; continue; }
             const value = Number(input.value);
             if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${input.dataset.symbol} 的目标比例必须在0到1之间。`);
             weights[input.dataset.symbol] = value;

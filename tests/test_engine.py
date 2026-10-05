@@ -68,6 +68,28 @@ def test_progress_reports_completed_sessions_in_batches(small, config):
     assert progress == [(10, 25), (20, 25), (25, 25)]
 
 
+def test_strategy_diagnostics_are_dated_bounded_and_do_not_change_account(small, config):
+    def session(ctx):
+        # Repeated notes from helpers within the same session are only stored once.
+        for _ in range(2):
+            ctx.note("insufficient_history", "观察窗口不足", strategy="example", symbol="A",
+                     required_history=20, available_history=1, action="skip_signal", arbitrary="discarded")
+        for number in range(50):
+            ctx.note("detail", str(number), strategy="example", action="base_purchase")
+
+    result = run_small(small, config, SimpleNamespace(on_session=session))
+    notes = result["metadata"]["strategy_diagnostics"]
+    assert len(notes) == 200
+    assert result["metadata"]["strategy_diagnostics_omitted"] > 0
+    assert notes[0] == {"date": "2024-01-04", "code": "insufficient_history", "message": "观察窗口不足",
+                        "strategy": "example", "symbol": "A", "required_history": 20,
+                        "available_history": 1, "action": "skip_signal"}
+    assert all(note["date"] in small["sessions"] for note in notes)
+    assert not result["orders"] and not result["trades"]
+    assert result["metrics"]["final_equity"] == 1000
+    assert any("诊断" in note for note in result["metadata"]["notes"])
+
+
 def shanghai_star_sample(small):
     symbol = "sh.688001"
     security = small["securities"].pop("A")

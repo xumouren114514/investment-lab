@@ -28,12 +28,8 @@
           !key || key.length > 256 || typeof params !== 'string' || params.length > 100_000)) {
       throw new Error('配置中的分策略参数无效。');
     }
-    for (const [key, params] of Object.entries(strategyParams)) {
-      try {
-        const parsed = JSON.parse(params);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
-      } catch { throw new Error(`配置中的 ${key} 策略参数不是有效 JSON 对象。`); }
-    }
+    // These are editor drafts, not executable parameters. Incomplete JSON must
+    // remain restorable; the page validates it before enabling a run.
     // Copy only known keys; files cannot inject extra form fields or executable code.
     return {format, version: 1, name: value.name, snapshots: [...value.snapshots],
       symbols: [...value.symbols], fields: Object.fromEntries(fields.map(id => [id, value.fields[id]])),

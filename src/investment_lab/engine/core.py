@@ -26,15 +26,21 @@ def is_shanghai_star_stock(security, symbol):
 
 class Context:
     """Only copies of already available bars/account values are exposed. Trusted Python, not a security sandbox."""
-    def __init__(self, day, rows, account, equity, pending, submit, symbols, params, state, securities, mode):
+    def __init__(self, day, rows, account, equity, pending, submit, symbols, params, state, securities, mode, diagnostic=None):
         self.date, self.symbols, self.params, self.state = day, tuple(symbols), deepcopy(params), state
         self.cash, self.debt, self.equity = account.cash, account.debt, equity
         self.positions = dict(account.positions)
         self.pending = deepcopy(pending)
         self._rows = MappingProxyType({symbol: _HistoryView(values) for symbol, values in rows.items()})
         self._submit = submit
+        self._diagnostic = diagnostic
         self._multipliers = {s: dec(securities[s].get("multiplier", 1)) for s in symbols}
         self._default_field = "close" if mode in ("close_research", REFERENCE_MODE) else "vwap_value"
+
+    def note(self, code, message, **details):
+        """Record a bounded diagnostic without changing orders or the strategy clock."""
+        if self._diagnostic is not None:
+            self._diagnostic(self.date, code, message, details)
 
     def history(self, symbol, count=20, field=None):
         if count < 1:
@@ -184,6 +190,30 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
     index = {(b["symbol"], b["date"]): b for b in bars}
     account = Account(config.initial_cash)
     pending, trades, orders, curve, notes = [], [], [], [], []
+    strategy_diagnostics, diagnostic_keys = [], set()
+    diagnostic_omitted = 0
+
+    def record_diagnostic(day, code, message, details):
+        nonlocal diagnostic_omitted
+        item = {"date": day, "code": str(code)[:80], "message": str(message)[:400]}
+        for key in ("strategy", "symbol", "required_history", "available_history", "missing_fields", "action"):
+            value = details.get(key)
+            if value is None:
+                continue
+            if isinstance(value, (list, tuple)):
+                item[key] = [str(part)[:80] for part in value[:8]]
+            elif isinstance(value, int) and not isinstance(value, bool):
+                item[key] = value
+            else:
+                item[key] = str(value)[:120]
+        key = digest(item)
+        if key in diagnostic_keys:
+            return
+        if len(strategy_diagnostics) >= 200:
+            diagnostic_omitted += 1
+            return
+        diagnostic_keys.add(key)
+        strategy_diagnostics.append(item)
     if reference:
         notes.append(REFERENCE_WARNING)
     histories = {s: [b for b in bars if b["symbol"] == s and b["date"] < sessions[0]] for s in config.symbols}
@@ -385,7 +415,7 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                     submit(symbol, -qty, "维持保证金不足，下一交易日减仓", True)
             account.event(day, "margin_call", equity=equity, exposure=exposure)
         elif day != sessions[-1]:
-            ctx = Context(day, histories, account, equity, [{"symbol": o.symbol, "remaining": str(o.remaining)} for o in pending], submit, config.symbols, params or {}, state, securities, config.mode)
+            ctx = Context(day, histories, account, equity, [{"symbol": o.symbol, "remaining": str(o.remaining)} for o in pending], submit, config.symbols, params or {}, state, securities, config.mode, record_diagnostic)
             if session_index == 0 and hasattr(strategy, "initialize"):
                 strategy.initialize(ctx)
             strategy.on_session(ctx)
@@ -396,6 +426,10 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
     if hasattr(strategy, "on_finish"):
         strategy.on_finish(SimpleNamespace(curve=deepcopy(curve), trades=deepcopy(trades), state=state))
     from investment_lab.research.metrics import metrics
+    if strategy_diagnostics:
+        notes.append(f"策略诊断：记录 {len(strategy_diagnostics)} 项历史不足、字段缺失或其他提示；请查看诊断明细。")
+    if diagnostic_omitted:
+        notes.append(f"策略诊断达到 200 项上限，另有 {diagnostic_omitted} 项未保存；提示不改变撮合或资金计算。")
     return {"curve": curve, "trades": trades, "orders": orders, "ledger": account.ledger,
             "metrics": metrics(curve, trades, config.initial_cash, account.realized),
             "metadata": {"price_model": config.mode, "valuation": "拆股调整参考收盘价" if reference else "股票收盘价/期货结算价", "synthetic": manifest["synthetic"],
@@ -406,6 +440,7 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                          "reference_units": "调整后参考份额，不是历史实际股数" if reference else None,
                          "point_in_time_prices_verified": False if reference else None,
                          "currency": securities[config.symbols[0]]["currency"], "assumptions": config.assumptions,
-                         "notes": notes, "bankrupt": bankrupt, "signal_model": "当日数据可用后决策，数量固定，下一交易日结算成交",
+                         "notes": notes, "strategy_diagnostics": strategy_diagnostics, "strategy_diagnostics_omitted": diagnostic_omitted,
+                         "bankrupt": bankrupt, "signal_model": "当日数据可用后决策，数量固定，下一交易日结算成交",
                          "survivorship_bias": "固定事后选择股票池，未消除生存者偏差", "selection_date": manifest.get("source", {}).get("selection_date"),
                          "normal_ranking_eligible": config.mode not in ("close_research", REFERENCE_MODE) and not manifest["synthetic"] and not config.allow_unverified_actions}}

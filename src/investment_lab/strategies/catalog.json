@@ -53,6 +53,10 @@
             {
               "value": "quarterly",
               "label": "每季"
+            },
+            {
+              "value": "yearly",
+              "label": "每年"
             }
           ],
           "help": "在每个周期的首个交易日下单。"
@@ -169,7 +173,7 @@
       "id": "target_allocation",
       "name": "目标比例配置与再平衡",
       "category": "组合配置",
-      "description": "为所选标的设置目标权重，按日历周期或偏离阈值再平衡。",
+      "description": "仅在日历周期首个交易日检查；与目标权重的偏离达到阈值时再平衡。",
       "scope": "multi",
       "parameters": [
         {
@@ -178,7 +182,7 @@
           "type": "weights",
           "default": {},
           "maxTotal": 1,
-          "help": "权重总和不超过100%；未分配部分保留现金。"
+          "help": "权重总和不超过100%；非空映射中未分配部分保留现金。空映射 {} 使用所选标的等权。"
         },
         {
           "key": "frequency",
@@ -215,7 +219,7 @@
       "id": "moving_average",
       "name": "均线趋势过滤",
       "category": "趋势与动量",
-      "description": "收盘价高于历史简单均线时持有目标仓位，否则退出。",
+      "description": "当前价格高于同口径历史简单均线时持有，否则退出；严格/估算 VWAP 模式使用 VWAP，收盘价/参考研究模式使用 close。",
       "scope": "single",
       "parameters": [
         {
@@ -352,7 +356,7 @@
       "id": "rotation",
       "name": "同市场动量轮动",
       "category": "趋势与动量",
-      "description": "在所选标的中按滚动收益排序，定期持有领先标的。",
+      "description": "按滚动收益排序，定期持有领先标的；信号价格随成交模式，同分时按所选标的顺序。",
       "scope": "multi",
       "parameters": [
         {
@@ -440,7 +444,7 @@
       "id": "drawdown_buy",
       "name": "回撤买入",
       "category": "均值回归与回撤",
-      "description": "相对滚动高点回撤达到阈值时建立目标仓位。",
+      "description": "相对滚动高点回撤达到阈值时建立目标仓位；信号价格随成交模式，兼容旧策略的部分历史窗口计算。",
       "scope": "single",
       "parameters": [
         {

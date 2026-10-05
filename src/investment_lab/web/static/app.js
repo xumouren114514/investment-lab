@@ -3,7 +3,7 @@ const esc = (s) => String(s ?? '—').replace(/[&<>"']/g, c => ({'&':'&amp;','<'
 const pct = (x) => x == null ? '—' : (x * 100).toFixed(2) + '%';
 const num = (x) => x == null ? '—' : Number(x).toLocaleString('zh-CN',{maximumFractionDigits:2});
 let datasets = [], instruments = [], currentRun = null, currentSample = 0, currentSection = 'holdout', tableOffset = 0, tableName = 'trades';
-let strategyCatalog = [], strategyParamsById = {}, activeStrategyId = '';
+let strategyCatalog = [], strategyParamsById = {}, strategyParamTextById = {}, activeStrategyId = '';
 let polling = null, pollingRun = null, detailRequest = 0, pollInFlight = false;
 let selectedSnapshotIds = [];
 let supportsMultiSnapshot = false;
@@ -101,38 +101,31 @@ function updateStrategyScopeNote(){
 }
 function renderStrategyParameters(changed=true){
  const id=$('strategy').value,priorId=activeStrategyId;
- let prior={};try{prior=parseStrategyParams();}catch(_){/* Preserve malformed JSON for correction in advanced settings. */}
- if(priorId)strategyParamsById[priorId]=prior;
- let next;
- if(id===priorId)next=prior;
- else if(strategyParamsById[id])next=strategyParamsById[id];
- else if(!priorId)next=prior;
- else next=InvestmentLabStrategyForms.defaults(strategyEntry(id));
+ if(priorId)strategyParamTextById[priorId]=$('params').value;
+ if(id!==priorId&&priorId)$('params').value=Object.hasOwn(strategyParamTextById,id)
+  ?strategyParamTextById[id]:JSON.stringify(InvestmentLabStrategyForms.defaults(strategyEntry(id)),null,2);
  const entry=strategyEntry(id),selected=selectedStrategySymbols();
- if(entry)for(const field of entry.parameters||[])if(field.type==='weights'){
-  const supplied=next[field.key]&&typeof next[field.key]==='object'&&!Array.isArray(next[field.key])?next[field.key]:{};
-  next[field.key]=Object.fromEntries(Object.entries(supplied).filter(([symbol])=>selected.includes(symbol)));
- }
- activeStrategyId=id;strategyParamsById[id]=next;
- $('params').value=JSON.stringify(next,null,2);
+ activeStrategyId=id;strategyParamTextById[id]=$('params').value;
+ let next=strategyParamsById[id]||InvestmentLabStrategyForms.defaults(entry),error='';
+ try{next=parseStrategyParams();strategyParamsById[id]=next;error=InvestmentLabStrategyForms.validateValues(entry,{...InvestmentLabStrategyForms.defaults(entry),...next},selected).error||'';}
+ catch(problem){error=problem.message;}
  InvestmentLabStrategyForms.render($('strategy-parameter-fields'),entry,next,selectedStrategySymbols());
  $('strategy-count').textContent=`${strategyCatalog.length} 种预设`;
- $('strategy-parameter-status').textContent=entry?'常用字段会同步到高级 JSON；未填参数使用表单默认值。':'';
- $('strategy-parameter-status').classList.remove('run-error');
+ $('strategy-parameter-status').textContent=error||(entry?'常用字段会同步到高级 JSON；未填参数使用表单默认值。':'');
+ $('strategy-parameter-status').classList.toggle('run-error',!!error);
  if(changed)saveConfigDraft();
 }
 function syncStrategyParameters(){
  const entry=strategyEntry();let current;
  try{current=parseStrategyParams();}catch(error){$('strategy-parameter-status').textContent=error.message;$('strategy-parameter-status').classList.add('run-error');refreshConfigValidity();return;}
  const symbols=selectedStrategySymbols();
- const rawError=InvestmentLabStrategyForms.validateValues(entry,{...InvestmentLabStrategyForms.defaults(entry),...current},symbols).error;
- if(rawError){$('strategy-parameter-status').textContent=rawError;$('strategy-parameter-status').classList.add('run-error');refreshConfigValidity();return;}
  const result=InvestmentLabStrategyForms.read($('strategy-parameter-fields'),entry,current,symbols);
  $('strategy-parameter-status').textContent=result.error||'参数有效；可展开高级设置查看完整 JSON。';
  $('strategy-parameter-status').classList.toggle('run-error',!!result.error);
  if(!result.error){
   $('params').value=JSON.stringify(result.value,null,2);
   strategyParamsById[$('strategy').value]=result.value;
+  strategyParamTextById[$('strategy').value]=$('params').value;
   saveConfigDraft();
  }
  refreshConfigValidity();
@@ -163,11 +156,7 @@ $('monthly-deposit').addEventListener('input',()=>{
 });
 $('flows').addEventListener('input',syncMonthlyDeposit);
 $('params').addEventListener('input',()=>{
- try{
-  const value=parseStrategyParams();strategyParamsById[$('strategy').value]=value;
-  InvestmentLabStrategyForms.render($('strategy-parameter-fields'),strategyEntry(),value,selectedStrategySymbols());
-  $('strategy-parameter-status').textContent='已从高级 JSON 更新参数表单。';$('strategy-parameter-status').classList.remove('run-error');
- }catch(error){$('strategy-parameter-status').textContent=error.message;$('strategy-parameter-status').classList.add('run-error');}
+ renderStrategyParameters(false);
  refreshConfigValidity();
 });
 $('symbols').onchange=()=>{renderStrategyParameters(false);updateStrategyScopeNote();refreshConfigValidity();};
@@ -201,19 +190,39 @@ function cashFlowPlanHtml(metadata){
  if(!plan||!Object.keys(plan).length)return '';
  return `<details><summary>本区间入金 / 提款计划（${Object.keys(plan).length} 个日期）</summary><p class="help">${esc(metadata.monthly_deposit_rule||'按指定交易日处理；金额为同日合计。')}</p><pre>${esc(JSON.stringify(plan,null,2))}</pre></details>`;
 }
+function strategyDiagnosticsHtml(metadata={}){
+ const notes=Array.isArray(metadata?.notes)?metadata.notes:[];
+ const diagnostics=Array.isArray(metadata?.strategy_diagnostics)?metadata.strategy_diagnostics.filter(item=>item&&typeof item==='object'):[];
+ const omitted=Math.max(0,Number(metadata?.strategy_diagnostics_omitted)||0);
+ if(!notes.length&&!diagnostics.length&&!omitted)return '';
+ const warning=`<div class="callout demo" role="status"><strong>策略与数据提示</strong>${notes.map(note=>`<p>${esc(note)}</p>`).join('')}${diagnostics.length||omitted?`<p>保存 ${diagnostics.length} 项策略诊断${omitted?`，另有 ${esc(omitted)} 项未保存`:''}。请展开下方明细核对未交易或等待的原因。</p>`:''}</div>`;
+ if(!diagnostics.length)return warning;
+ return warning+`<details class="strategy-diagnostics"><summary>策略诊断明细（${diagnostics.length}项）</summary><div class="table-wrap"><table><thead><tr><th>日期</th><th>策略</th><th>标的</th><th>处理方式</th><th>原因</th></tr></thead><tbody>${diagnostics.map(item=>`<tr><td>${esc(item.date)}</td><td>${esc(item.strategy)}</td><td>${esc(item.symbol)}</td><td>${esc(({skip_signal:"等待完整指标后发出信号",base_purchase:"按基础金额定投",partial_window_signal:"使用已知的短历史窗口"})[item.action]??item.action??'')}</td><td>${esc(item.message??item.reason??item.code??'')}</td></tr>`).join('')}</tbody></table></div></details>`;
+}
 let configReady=false, restoringConfig=false;
 function configRepository(){return ResearchConfig.repository(window.localStorage);}
-function currentConfig(){return ResearchConfig.capture(document,selectedSnapshotIds,Object.fromEntries(Object.entries(strategyParamsById).map(([id,value])=>[id,JSON.stringify(value)])));}
+function currentConfig(){
+ strategyParamTextById[$('strategy').value]=$('params').value;
+ return ResearchConfig.capture(document,selectedSnapshotIds,strategyParamTextById);
+}
+function configJsonError(){
+ for(const [id,label] of [['flows','资金流'],['advanced','其他引擎配置']]){
+  try{InvestmentLabStrategyForms.parseObject($(id).value,label);$(id).setCustomValidity('');}
+  catch(error){$(id).setCustomValidity(error.message);return error.message;}
+ }
+ return '';
+}
 function refreshConfigValidity(){
  const parameterError=strategyParameterError();
- $('run-button').disabled=!!datasetSelectionError()||!!parameterError;updatePriceModeNote();
+ $('run-button').disabled=!!datasetSelectionError()||!!parameterError||!!configJsonError();updatePriceModeNote();
 }
 function saveConfigDraft(){
  if(!configReady||restoringConfig)return;
  try{
   configRepository().saveDraft(currentConfig());
-  $('draft-status').textContent='草稿已自动保存 · '+new Date().toLocaleTimeString('zh-CN');
-  $('draft-status').classList.remove('run-error');
+  const jsonError=configJsonError();
+  $('draft-status').textContent='草稿已自动保存 · '+new Date().toLocaleTimeString('zh-CN')+(jsonError?'；'+jsonError:'');
+  $('draft-status').classList.toggle('run-error',!!jsonError);
  }catch(e){
   $('draft-status').textContent='草稿未保存，请导出 JSON 备份。'+e.message;
   $('draft-status').classList.add('run-error');
@@ -258,17 +267,17 @@ function applyConfig(input){
    if(['strategy','benchmark'].includes(id))restoreSelect(id,[config.fields[id]]);
    else $(id).value=config.fields[id];
   }
-  strategyParamsById=Object.fromEntries(Object.entries(config.strategyParams||{}).map(([id,value])=>[id,JSON.parse(value)]));
+  strategyParamTextById={...config.strategyParams};strategyParamsById={};
   const strategyId=$('strategy').value;
-  if(!strategyParamsById[strategyId])strategyParamsById[strategyId]=JSON.parse(config.fields.params||'{}');
-  $('params').value=JSON.stringify(strategyParamsById[strategyId],null,2);
+  // The visible field is authoritative, including whitespace and unfinished edits.
+  strategyParamTextById[strategyId]=config.fields.params;
   restoreSelect('symbols',config.symbols);
   activeStrategyId='';renderStrategyParameters(false);syncMonthlyDeposit();
   $('preset-name').value=config.name;
   $('dataset-search').value='';filterSnapshotOptions();
   $('kind').onchange();updateStrategyScopeNote();refreshConfigValidity();
  }finally{restoringConfig=false;}
- return datasetSelectionError();
+ return [datasetSelectionError(),strategyParameterError(),configJsonError()].filter(Boolean).join(' ');
 }
 function initializeConfigPersistence(){
  try{
@@ -286,6 +295,7 @@ function initializeConfigPersistence(){
 }
 $('run-form').addEventListener('input',e=>{
  if(ResearchConfig.fields.includes(e.target.id)||e.target.id==='preset-name')saveConfigDraft();
+ if(['params','flows','advanced'].includes(e.target.id))refreshConfigValidity();
 });
 $('run-form').addEventListener('change',e=>{
  if(ResearchConfig.fields.includes(e.target.id)||e.target.id==='symbols'||e.target.name==='snapshots')saveConfigDraft();
@@ -364,8 +374,6 @@ function currentStrategyParams(){
  if(rawError)throw new Error(rawError);
  const result=InvestmentLabStrategyForms.read($('strategy-parameter-fields'),entry,raw,symbols);
  if(result.error)throw new Error(result.error);
- strategyParamsById[$('strategy').value]=result.value;
- $('params').value=JSON.stringify(result.value,null,2);
  return result.value;
 }
 $('run-form').onsubmit=safe(async e=>{e.preventDefault();const selectionError=datasetSelectionError();if(selectionError)throw new Error(selectionError);const config={start:$('start').value,end:$('end').value,symbols:[...$('symbols').selectedOptions].map(o=>o.value),initial_cash:$('cash').value,max_leverage:$('leverage').value,mode:$('mode').value,commission_bps:$('commission').value,slippage_bps:$('slippage').value,annual_interest:$('interest').value,warmup:Number($('warmup').value),cash_flows:JSON.parse($('flows').value),benchmark:$('benchmark').value||null,...JSON.parse($('advanced').value)};const chosen=$('strategy').value,params=currentStrategyParams();const request={...(selectedSnapshotIds.length===1?{snapshot:selectedSnapshotIds[0]}:{snapshots:[...selectedSnapshotIds]}),config,strategy:chosen.startsWith('custom:')?'custom':chosen,params,kind:$('kind').value};if(chosen.startsWith('custom:'))request.strategy_file=chosen.slice(7);if(request.kind==='rolling')request.research={interval:$('interval').value,horizon:Number($('horizon').value),end_mode:$('end-mode').value};if(request.kind==='holdout')request.research={test_start:$('test-start').value,gap_sessions:Number($('gap').value)};$('run-button').disabled=true;try{const r=await api('/runs',request);currentRun=r.run_id;view('runs');await openRun(r.run_id,0,'holdout',false);}finally{refreshConfigValidity();}});
@@ -452,7 +460,7 @@ async function openRun(id,sample=0,section='holdout',reveal=true){
  }
  stopPolling(id);
  const r=d.result;let experiment='';if(d.experiments?.samples){experiment=`<div class="panel"><div class="panel-heading"><h3>起点热力图</h3><span class="muted">${d.experiments.summary.count} 个有效窗口 · 亏损比例 ${pct(d.experiments.summary.loss_ratio)}</span></div><p class="help">${esc(d.experiments.metadata.overlap_warning)}。中位数 ${pct(d.experiments.summary.median)}，10% / 90% 分位数 ${pct(d.experiments.summary.q10)} / ${pct(d.experiments.summary.q90)}。</p><div class="heatmap">${d.experiments.samples.map((s,i)=>`<button data-sample="${i}" class="${s.status==='completed'?(s.metrics.total_return>=0?'gain':'loss'):''}" title="${esc(s.reason||s.end)}"><small>${esc(s.start)}</small>${s.status==='completed'?pct(s.metrics.total_return):'跳过'}</button>`).join('')}</div></div>`;}else if(d.experiments?.holdout){experiment=`<div class="panel"><div class="panel-heading"><h3>开发区间与留出验证</h3><span class="badge">${esc(d.experiments.metadata.label)}</span></div><div class="fields"><div><p>开发区间收益 ${pct(d.experiments.development.total_return)}</p><p>最大回撤 ${pct(d.experiments.development.max_drawdown)}</p><button data-section="development">查看开发区间</button></div><div><p>留出区间收益 ${pct(d.experiments.holdout.total_return)}</p><p>最大回撤 ${pct(d.experiments.holdout.max_drawdown)}</p><button data-section="holdout">查看留出区间</button></div></div><p class="help">${esc(d.experiments.metadata.initialization)}。系统仅记录本系统内运行与查看，无法保证外部未看过数据。</p></div>`;}
-target.innerHTML=resultHeader(id)+experiment+(r.metrics?`<div class="panel"><div class="panel-heading"><h3>净值与收益</h3><span class="badge ${d.request.synthetic||isReference(d.request)?'demo':''}">${d.request.synthetic?'合成演示 · 非投资结论':esc(modeNames[r.metadata?.price_model]||r.metadata?.price_model)}</span></div>${r.metadata?.reference_only?`<p class="callout demo">${esc(r.metadata.research_warning)}</p>`:''}${metricHtml(r.metrics)}<canvas class="chart" id="result-chart" aria-label="时间加权净值曲线"></canvas><p class="chart-caption">蓝色：策略时间加权净值${r.benchmark?'；橙色：相同期间与资金流基准':''}。入金不计为投资利润。</p><div class="result-meta"><span>成交 ${r.metrics.trades} 笔</span><span>年化收益 ${pct(r.metrics.annualized_return)}</span><span>波动率 ${pct(r.metrics.volatility)}</span><span>净入金 ${num(r.metrics.net_flows)}</span><span>净利润 ${num(r.metrics.net_profit)}</span></div><p class="help">${esc(r.metadata?.assumptions)}。${esc(r.metadata?.survivorship_bias)}。</p>${cashFlowPlanHtml(r.metadata)}${dataSourcesHtml(d.request)}<details><summary>复现元数据</summary><pre>${esc(JSON.stringify({run_id:id,snapshot:d.request.snapshot,strategy_hash:d.request.strategy_hash,engine_hash:d.request.engine_hash,version:d.request.app_version,git:d.request.git,metadata:r.metadata},null,2))}</pre></details></div><div class="panel"><div class="panel-heading"><h3>逐笔核对</h3><div class="result-tabs"><button data-table="trades">成交</button><button data-table="orders">信号与订单</button><button data-table="ledger">账户账本</button></div></div><div id="run-table" class="table-wrap"></div><div class="pagination"><button id="table-prev">上一页</button><span id="table-page"></span><button id="table-next">下一页</button></div></div>`:'<div class="panel">该窗口已跳过，查看热力图中的原因。</div>');
+target.innerHTML=resultHeader(id)+experiment+(r.metrics?`<div class="panel"><div class="panel-heading"><h3>净值与收益</h3><span class="badge ${d.request.synthetic||isReference(d.request)?'demo':''}">${d.request.synthetic?'合成演示 · 非投资结论':esc(modeNames[r.metadata?.price_model]||r.metadata?.price_model)}</span></div>${r.metadata?.reference_only?`<p class="callout demo">${esc(r.metadata.research_warning)}</p>`:''}${strategyDiagnosticsHtml(r.metadata)}${metricHtml(r.metrics)}<canvas class="chart" id="result-chart" aria-label="时间加权净值曲线"></canvas><p class="chart-caption">蓝色：策略时间加权净值${r.benchmark?'；橙色：相同期间与资金流基准':''}。入金不计为投资利润。</p><div class="result-meta"><span>成交 ${r.metrics.trades} 笔</span><span>年化收益 ${pct(r.metrics.annualized_return)}</span><span>波动率 ${pct(r.metrics.volatility)}</span><span>净入金 ${num(r.metrics.net_flows)}</span><span>净利润 ${num(r.metrics.net_profit)}</span></div><p class="help">${esc(r.metadata?.assumptions)}。${esc(r.metadata?.survivorship_bias)}。</p>${cashFlowPlanHtml(r.metadata)}${dataSourcesHtml(d.request)}<details><summary>复现元数据</summary><pre>${esc(JSON.stringify({run_id:id,snapshot:d.request.snapshot,strategy_hash:d.request.strategy_hash,engine_hash:d.request.engine_hash,version:d.request.app_version,git:d.request.git,metadata:r.metadata},null,2))}</pre></details></div><div class="panel"><div class="panel-heading"><h3>逐笔核对</h3><div class="result-tabs"><button data-table="trades">成交</button><button data-table="orders">信号与订单</button><button data-table="ledger">账户账本</button></div></div><div id="run-table" class="table-wrap"></div><div class="pagination"><button id="table-prev">上一页</button><span id="table-page"></span><button id="table-next">下一页</button></div></div>`:'<div class="panel">该窗口已跳过，查看热力图中的原因。</div>');
 bindRunDetail(reveal);
 document.querySelectorAll('[data-sample]').forEach(b=>b.onclick=safe(()=>openRun(id,Number(b.dataset.sample))));document.querySelectorAll('[data-section]').forEach(b=>b.onclick=safe(()=>openRun(id,0,b.dataset.section)));if(r.metrics){drawChart($('result-chart'),r.curve,r.benchmark?.curve);document.querySelectorAll('[data-table]').forEach(b=>b.onclick=safe(()=>{tableName=b.dataset.table;tableOffset=0;return loadTable();}));$('table-prev').onclick=safe(()=>{tableOffset=Math.max(0,tableOffset-100);return loadTable();});$('table-next').onclick=safe(()=>{tableOffset+=100;return loadTable();});await loadTable();if(token!==detailRequest)return;$('latest-preview').innerHTML=`<div class="panel-heading"><h3>最近一次研究</h3><span class="badge ${d.request.synthetic||isReference(d.request)?'demo':''}">${runDataLabel(d.request)}</span></div>${isReference(d.request)?`<p class="callout demo">${esc(referenceNote)}</p>`:''}${metricHtml(r.metrics)}<canvas class="chart" id="preview-chart" aria-label="最近研究曲线"></canvas><button id="show-latest">打开完整结果 →</button>`;$('show-latest').onclick=safe(async()=>{view('runs');await openRun(id);});requestAnimationFrame(()=>drawChart($('preview-chart'),r.curve));}}
 async function loadTable(){const r=await api(`/runs/${currentRun}/table?table=${tableName}&offset=${tableOffset}&sample=${currentSample}&section=${currentSection}`);const keys=tableName==='trades'?['date','signal_date','symbol','quantity','price','fee','reason']:tableName==='orders'?['signal_date','symbol','quantity','reason','visible']:['date','type','symbol','amount','cash','debt','reason'];const labels={date:'日期',signal_date:'信号日期',symbol:'证券',quantity:'数量',price:'价格',fee:'费用',reason:'原因',visible:'可见数据摘要',type:'事件',amount:'金额',cash:'现金',debt:'借款'};$('run-table').innerHTML='<table><thead><tr>'+keys.map(k=>'<th>'+labels[k]+'</th>').join('')+'</tr></thead><tbody>'+r.items.map(row=>'<tr>'+keys.map(k=>`<td>${esc(typeof row[k]==='object'?JSON.stringify(row[k]):row[k])}</td>`).join('')+'</tr>').join('')+'</tbody></table>';$('table-page').textContent=`${r.total?tableOffset+1:0}–${Math.min(tableOffset+100,r.total)} / ${r.total}`;$('table-prev').disabled=tableOffset===0;$('table-next').disabled=tableOffset+100>=r.total;}

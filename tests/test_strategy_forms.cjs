@@ -39,9 +39,20 @@ test('portfolio weights, strict dates and legacy extra parameters round-trip', (
   const allocation = entry('target_allocation');
   assert.match(Forms.validateValues(allocation, {weights:{A:.7, B:.4}, frequency:'monthly', rebalance_threshold:.05}, ['A','B']).error, /总和/);
   assert.match(Forms.validateValues(allocation, {weights:{C:.2}, frequency:'monthly', rebalance_threshold:.05}, ['A','B']).error, /未被选中/);
+  assert.match(Forms.validateValues(allocation, {weights:{A:1}, frequency:'monthly', rebalance_threshold:.05}, []).error, /未被选中/);
   const equal = Forms.validateValues(allocation, {weights:{A:.6, B:.4}, frequency:'monthly', rebalance_threshold:.05, legacy_flag:true}, ['A','B']);
   assert.equal(equal.error, null);
   assert.equal(equal.value.legacy_flag, true);
   assert.match(Forms.validateValues(entry('monthly_equal_weight'), {portfolio_mode:'rebalance', rebalance_threshold:.05, month_end_dates:['2024-02-30']}).error, /有效/);
   assert.match(Forms.validateValues(entry('monthly_equal_weight'), {portfolio_mode:'rebalance', rebalance_threshold:.05, month_end_dates:['2024-02-29','2024-02-29']}).error, /重复/);
+});
+
+test('history hints explain adaptive contributions and legacy partial drawdown windows', () => {
+  const host={innerHTML:''};
+  Forms.render(host,entry('adaptive_dca'),Forms.defaults(entry('adaptive_dca')),['A']);
+  assert.match(host.innerHTML,/继续按基础金额定投/);
+  Forms.render(host,entry('drawdown_buy'),Forms.defaults(entry('drawdown_buy')),['A']);
+  assert.match(host.innerHTML,/已知的短窗口/);
+  Forms.render(host,entry('rsi_mean_reversion'),Forms.defaults(entry('rsi_mean_reversion')),['A']);
+  assert.match(host.innerHTML,/指标观察窗口不足.*等待/);
 });

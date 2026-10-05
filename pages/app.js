@@ -10,7 +10,7 @@ let packages = [];
 let runs = [];
 let selectedIds = [];
 let selectedSymbols = [];
-let strategyCatalog = [], strategyParamsById = {}, activeStrategyId = '';
+let strategyCatalog = [], strategyParamsById = {}, strategyParamTextById = {}, activeStrategyId = '';
 let runtimeManifest, runtimeManifestHash = '', strategySource = '';
 
 async function sha256Hex(value) {
@@ -66,7 +66,7 @@ async function deleteStore(name, key) {
 
 function getWorker() {
   if (worker) return worker;
-  worker = new Worker(new URL('./worker.js?v=20260924-7', import.meta.url), {type:'module'});
+  worker = new Worker(new URL('./worker.js?v=20261005-1', import.meta.url), {type:'module'});
   worker.onmessage = event => {
     let message;
     try { message = typeof event.data === 'string' ? JSON.parse(event.data) : event.data; }
@@ -105,7 +105,8 @@ function draftValues() {
 }
 
 function saveDraft() {
-  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({fields:draftValues(), selectedIds, selectedSymbols, strategyParams:strategyParamsById})); }
+  strategyParamTextById[$('#strategy').value] = $('#params').value;
+  try { localStorage.setItem(DRAFT_KEY, JSON.stringify({fields:draftValues(), selectedIds, selectedSymbols, strategyParams:strategyParamTextById})); }
   catch (_) { notice('浏览器无法保存自动草稿；请导出本机数据备份。', true); }
 }
 
@@ -117,10 +118,15 @@ function restoreDraft() {
     }
     selectedIds = Array.isArray(draft.selectedIds) ? draft.selectedIds : [];
     selectedSymbols = Array.isArray(draft.selectedSymbols) ? draft.selectedSymbols : [];
-    strategyParamsById = draft.strategyParams && typeof draft.strategyParams === 'object' && !Array.isArray(draft.strategyParams) ? draft.strategyParams : {};
+    const saved = draft.strategyParams && typeof draft.strategyParams === 'object' && !Array.isArray(draft.strategyParams) ? draft.strategyParams : {};
+    // Earlier browser drafts stored parsed objects. Accept both without parsing
+    // the new raw strings, which may deliberately contain unfinished JSON.
+    strategyParamTextById = Object.fromEntries(Object.entries(saved).map(([id,value]) =>
+      [id, typeof value === 'string' ? value : JSON.stringify(value)]));
+    strategyParamsById = {};
   } catch (_) { /* A damaged draft falls back to safe form defaults. */ }
   activeStrategyId = $('#strategy').value;
-  try { strategyParamsById[activeStrategyId] = JSON.parse($('#params').value || '{}'); } catch (_) { /* Preserve malformed JSON for correction. */ }
+  strategyParamTextById[activeStrategyId] = $('#params').value;
   renderStrategyParameters(false);
   syncMonthlyDeposit();
   updateStrategyScopeNote();
@@ -137,24 +143,18 @@ function updateStrategyScopeNote(){
 }
 function renderStrategyParameters(changed=true){
   const id=$('#strategy').value,priorId=activeStrategyId;
-  let prior={};try{prior=parseStrategyParams();}catch(_){/* Keep invalid JSON visible in advanced settings. */}
-  if(priorId)strategyParamsById[priorId]=prior;
-  let next;
-  if(id===priorId)next=prior;
-  else if(strategyParamsById[id])next=strategyParamsById[id];
-  else if(!priorId)next=prior;
-  else next=InvestmentLabStrategyForms.defaults(strategyEntry(id));
+  if(priorId)strategyParamTextById[priorId]=$('#params').value;
+  if(id!==priorId&&priorId)$('#params').value=Object.hasOwn(strategyParamTextById,id)
+    ?strategyParamTextById[id]:JSON.stringify(InvestmentLabStrategyForms.defaults(strategyEntry(id)),null,2);
   const entry=strategyEntry(id),symbols=selectedStrategySymbols();
-  if(entry)for(const field of entry.parameters||[])if(field.type==='weights'){
-    const supplied=next[field.key]&&typeof next[field.key]==='object'&&!Array.isArray(next[field.key])?next[field.key]:{};
-    next[field.key]=Object.fromEntries(Object.entries(supplied).filter(([symbol])=>symbols.includes(symbol)));
-  }
-  activeStrategyId=id;strategyParamsById[id]=next;
-  $('#params').value=JSON.stringify(next,null,2);
+  activeStrategyId=id;strategyParamTextById[id]=$('#params').value;
+  let next=strategyParamsById[id]||InvestmentLabStrategyForms.defaults(entry),error='';
+  try{next=parseStrategyParams();strategyParamsById[id]=next;error=InvestmentLabStrategyForms.validateValues(entry,{...InvestmentLabStrategyForms.defaults(entry),...next},symbols).error||'';}
+  catch(problem){error=problem.message;}
   InvestmentLabStrategyForms.render($('#strategy-parameter-fields'),entry,next,symbols);
   $('#strategy-count').textContent=`${strategyCatalog.length} 种预设`;
-  $('#strategy-parameter-status').textContent=entry?'常用字段会同步到高级 JSON；未填参数使用表单默认值。':'';
-  $('#strategy-parameter-status').classList.remove('run-error');
+  $('#strategy-parameter-status').textContent=error||(entry?'常用字段会同步到高级 JSON；未填参数使用表单默认值。':'');
+  $('#strategy-parameter-status').classList.toggle('run-error',!!error);
   updateStrategyScopeNote();
   if(changed)saveDraft();
   refreshRunButton();
@@ -162,12 +162,10 @@ function renderStrategyParameters(changed=true){
 function syncStrategyParameters(){
   let current={};try{current=parseStrategyParams();}catch(error){$('#strategy-parameter-status').textContent=error.message;$('#strategy-parameter-status').classList.add('run-error');refreshRunButton();return;}
   const entry=strategyEntry(),symbols=selectedStrategySymbols();
-  const rawError=InvestmentLabStrategyForms.validateValues(entry,{...InvestmentLabStrategyForms.defaults(entry),...current},symbols).error;
-  if(rawError){$('#strategy-parameter-status').textContent=rawError;$('#strategy-parameter-status').classList.add('run-error');refreshRunButton();return;}
   const result=InvestmentLabStrategyForms.read($('#strategy-parameter-fields'),entry,current,symbols);
   $('#strategy-parameter-status').textContent=result.error||'参数有效；可展开高级设置查看完整 JSON。';
   $('#strategy-parameter-status').classList.toggle('run-error',!!result.error);
-  if(!result.error){$('#params').value=JSON.stringify(result.value,null,2);strategyParamsById[$('#strategy').value]=result.value;saveDraft();}
+  if(!result.error){$('#params').value=JSON.stringify(result.value,null,2);strategyParamsById[$('#strategy').value]=result.value;strategyParamTextById[$('#strategy').value]=$('#params').value;saveDraft();}
   refreshRunButton();
 }
 function strategyParameterError(){
@@ -179,7 +177,9 @@ function strategyParameterError(){
   catch(error){return error.message;}
 }
 function refreshRunButton(){
-  $('#run').disabled=selectedIds.length===0||selectedSymbols.length===0||!!strategyParameterError();
+  let flowError='';try{InvestmentLabStrategyForms.parseObject($('#flows').value,'资金流');}catch(error){flowError=error.message;}
+  $('#flows').setCustomValidity(flowError);
+  $('#run').disabled=selectedIds.length===0||selectedSymbols.length===0||!!strategyParameterError()||!!flowError;
 }
 function syncMonthlyDeposit(){
   const input=$('#monthly-deposit');
@@ -196,17 +196,11 @@ $('#monthly-deposit').addEventListener('input',()=>{
   try{$('#flows').value=InvestmentLabUI.writeAmount($('#flows').value,'monthly',$('#monthly-deposit').value,'资金流');syncMonthlyDeposit();saveDraft();}
   catch(error){$('#funding-status').textContent=error.message;$('#funding-status').classList.add('run-error');}
 });
-$('#flows').addEventListener('input',syncMonthlyDeposit);
+$('#flows').addEventListener('input',()=>{syncMonthlyDeposit();refreshRunButton();});
 $('#params').addEventListener('input',()=>{
-  try{
-    const value=parseStrategyParams();strategyParamsById[$('#strategy').value]=value;
-    InvestmentLabStrategyForms.render($('#strategy-parameter-fields'),strategyEntry(),value,selectedSymbols);
-    const entry=strategyEntry(),check=InvestmentLabStrategyForms.validateValues(entry,{...InvestmentLabStrategyForms.defaults(entry),...value},selectedStrategySymbols());
-    $('#strategy-parameter-status').textContent=check.error||'已从高级 JSON 更新参数表单。';$('#strategy-parameter-status').classList.toggle('run-error',!!check.error);
-  }catch(error){$('#strategy-parameter-status').textContent=error.message;$('#strategy-parameter-status').classList.add('run-error');}
+  renderStrategyParameters(false);
   refreshRunButton();
 });
-$('#strategy').addEventListener('change',()=>renderStrategyParameters(true));
 
 async function refreshStorage() {
   packages = await listStore('snapshots');
@@ -335,18 +329,27 @@ function tradeTable(trades) {
   if (!trades?.length) return '<p class="help">没有成交记录。</p>';
   return `<div class="table-wrap"><table><thead><tr><th>日期</th><th>证券</th><th>方向</th><th>数量</th><th>价格</th><th>费用</th><th>说明</th></tr></thead><tbody>${trades.slice(0,100).map(trade => `<tr><td>${escapeHtml(trade.date)}</td><td>${escapeHtml(trade.symbol)}</td><td>${Number(trade.quantity)>0?'买入':'卖出'}</td><td>${escapeHtml(trade.quantity)}</td><td>${escapeHtml(trade.price)}</td><td>${escapeHtml(trade.fee)}</td><td>${escapeHtml(trade.reason)}</td></tr>`).join('')}</tbody></table></div>${trades.length>100?'<p class="help">仅显示前100笔成交。</p>':''}`;
 }
+function strategyDiagnosticsHtml(metadata={}){
+  const notes=Array.isArray(metadata?.notes)?metadata.notes:[];
+  const diagnostics=Array.isArray(metadata?.strategy_diagnostics)?metadata.strategy_diagnostics.filter(item=>item&&typeof item==='object'):[];
+  const omitted=Math.max(0,Number(metadata?.strategy_diagnostics_omitted)||0);
+  if(!notes.length&&!diagnostics.length&&!omitted)return '';
+  const warning=`<div class="result-warning" role="status"><strong>策略与数据提示</strong>${notes.map(note=>`<p>${escapeHtml(note)}</p>`).join('')}${diagnostics.length||omitted?`<p>保存 ${diagnostics.length} 项策略诊断${omitted?`，另有 ${escapeHtml(omitted)} 项未保存`:''}。请展开下方明细核对未交易或等待的原因。</p>`:''}</div>`;
+  if(!diagnostics.length)return warning;
+  return warning+`<details class="strategy-diagnostics"><summary>策略诊断明细（${diagnostics.length}项）</summary><div class="table-wrap"><table><thead><tr><th>日期</th><th>策略</th><th>标的</th><th>处理方式</th><th>原因</th></tr></thead><tbody>${diagnostics.map(item=>`<tr><td>${escapeHtml(item.date)}</td><td>${escapeHtml(item.strategy)}</td><td>${escapeHtml(item.symbol)}</td><td>${escapeHtml(({skip_signal:"等待完整指标后发出信号",base_purchase:"按基础金额定投",partial_window_signal:"使用已知的短历史窗口"})[item.action]??item.action??'')}</td><td>${escapeHtml(item.message??item.reason??item.code??'')}</td></tr>`).join('')}</tbody></table></div></details>`;
+}
 
 function renderResult(result) {
   const detail = $('#result-detail');
   if (result.kind === 'single' || !result.kind) {
     const currency = result.metadata?.currency || '';
-    detail.innerHTML = `${metricCards(result.metrics, currency)}${equityChart(result.curve)}${result.benchmark?`<h3>基准结果</h3>${metricCards(result.benchmark.metrics,currency)}`:''}${result.metadata?.research_warning?`<div class="result-warning">${escapeHtml(result.metadata.research_warning)}</div>`:''}${result.metadata?.notes?.length?`<div class="result-warning">${result.metadata.notes.map(escapeHtml).join('<br>')}</div>`:''}<details><summary>成交明细（最多100笔）</summary>${tradeTable(result.trades)}</details><details><summary>完整结果 JSON</summary><pre>${escapeHtml(JSON.stringify(result,null,2))}</pre></details>`;
+    detail.innerHTML = `${metricCards(result.metrics, currency)}${equityChart(result.curve)}${result.benchmark?`<h3>基准结果</h3>${metricCards(result.benchmark.metrics,currency)}`:''}${result.metadata?.research_warning?`<div class="result-warning">${escapeHtml(result.metadata.research_warning)}</div>`:''}${strategyDiagnosticsHtml(result.metadata)}<details><summary>成交明细（最多100笔）</summary>${tradeTable(result.trades)}</details><details><summary>完整结果 JSON</summary><pre>${escapeHtml(JSON.stringify(result,null,2))}</pre></details>`;
   } else if (result.kind === 'rolling') {
     const summary = result.summary;
-    detail.innerHTML = `<div class="metric-grid">${[['已完成窗口',summary.count],['跳过窗口',summary.skipped],['亏损比例',formatPercent(summary.loss_ratio)],['收益中位数',formatPercent(summary.median)],['10%分位',formatPercent(summary.q10)],['90%分位',formatPercent(summary.q90)],['最好窗口',formatPercent(summary.best)],['最差窗口',formatPercent(summary.worst)]].map(([a,b])=>`<div class="metric"><span>${escapeHtml(a)}</span><strong>${b}</strong></div>`).join('')}</div><div class="table-wrap"><table><thead><tr><th>起点</th><th>终点</th><th>状态</th><th>收益</th><th>原因</th></tr></thead><tbody>${result.samples.map(sample=>`<tr><td>${escapeHtml(sample.start)}</td><td>${escapeHtml(sample.end||'')}</td><td>${escapeHtml(sample.status)}</td><td>${formatPercent(sample.metrics?.total_return)}</td><td>${escapeHtml(sample.reason||'')}</td></tr>`).join('')}</tbody></table></div><p class="result-warning">${escapeHtml(result.metadata?.overlap_warning||'滚动窗口研究仅供参考。')}</p>`;
+    detail.innerHTML = `<div class="metric-grid">${[['已完成窗口',summary.count],['跳过窗口',summary.skipped],['亏损比例',formatPercent(summary.loss_ratio)],['收益中位数',formatPercent(summary.median)],['10%分位',formatPercent(summary.q10)],['90%分位',formatPercent(summary.q90)],['最好窗口',formatPercent(summary.best)],['最差窗口',formatPercent(summary.worst)]].map(([a,b])=>`<div class="metric"><span>${escapeHtml(a)}</span><strong>${b}</strong></div>`).join('')}</div><div class="table-wrap"><table><thead><tr><th>起点</th><th>终点</th><th>状态</th><th>收益</th><th>原因</th></tr></thead><tbody>${result.samples.map(sample=>`<tr><td>${escapeHtml(sample.start)}</td><td>${escapeHtml(sample.end||'')}</td><td>${escapeHtml(sample.status)}</td><td>${formatPercent(sample.metrics?.total_return)}</td><td>${escapeHtml(sample.reason||'')}</td></tr>`).join('')}</tbody></table></div><p class="result-warning">${escapeHtml(result.metadata?.overlap_warning||'滚动窗口研究仅供参考。')}</p>${result.samples.map(sample=>{const diagnostic=strategyDiagnosticsHtml(sample.result?.metadata);return diagnostic?`<details><summary>起点 ${escapeHtml(sample.start)} 的策略提示</summary>${diagnostic}</details>`:'';}).join('')}`;
   } else {
     const currency = result.development?.result?.metadata?.currency || '';
-    detail.innerHTML = `<h3>开发区间</h3>${metricCards(result.development.result.metrics,currency)}${equityChart(result.development.result.curve)}<h3>留出区间</h3>${metricCards(result.holdout.result.metrics,currency)}${equityChart(result.holdout.result.curve)}<div class="result-warning">${escapeHtml(result.metadata?.initialization||'留出区间独立运行。')} ${escapeHtml(result.metadata?.parameter_selection||'')}</div>`;
+    detail.innerHTML = `<h3>开发区间</h3>${metricCards(result.development.result.metrics,currency)}${equityChart(result.development.result.curve)}${strategyDiagnosticsHtml(result.development.result.metadata)}<h3>留出区间</h3>${metricCards(result.holdout.result.metrics,currency)}${equityChart(result.holdout.result.curve)}${strategyDiagnosticsHtml(result.holdout.result.metadata)}<div class="result-warning">${escapeHtml(result.metadata?.initialization||'留出区间独立运行。')} ${escapeHtml(result.metadata?.parameter_selection||'')}</div>`;
   }
   detail.scrollIntoView({behavior:'smooth',block:'start'});
 }
@@ -463,8 +466,6 @@ function buildRunRequest() {
   if (rawError) throw new Error(rawError);
   const parameterResult = InvestmentLabStrategyForms.read($('#strategy-parameter-fields'), strategy, rawParams, symbols);
   if (parameterResult.error) throw new Error(parameterResult.error);
-  strategyParamsById[$('#strategy').value] = parameterResult.value;
-  $('#params').value = JSON.stringify(parameterResult.value, null, 2);
   const packagesJson = records.map(record => record.packageJson);
   const totalBytes = packagesJson.reduce((sum,value)=>sum+new Blob([value]).size,0);
   if (totalBytes > 128 * 1024 * 1024) throw new Error('本次选择的快照总量超过128 MiB，请减少标的或拆分研究。');

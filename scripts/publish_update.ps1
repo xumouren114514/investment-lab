@@ -96,8 +96,11 @@ foreach ($path in $powershellPaths) {
 
 Push-Location $projectDirectory
 try {
-    if ($pathsToPublish | Where-Object { $_ -match '(?i)\.py$' }) {
-        & $pythonExecutable -m compileall -q src scripts/desktop_app.py
+    $pythonPaths = @($pathsToPublish | Where-Object { $_ -match '(?i)\.py$' -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($pythonPaths.Count -gt 0) {
+        # Compile every explicitly published Python file, including scripts and tests.
+        # The helper uses compile() rather than writing __pycache__ into the checkout.
+        & $pythonExecutable scripts/check_python_syntax.py @pythonPaths
         if ($LASTEXITCODE -ne 0) { throw 'Python 语法检查失败。' }
     }
     if ($codePaths.Count -gt 0 -and $testsToRun.Count -gt 0) {

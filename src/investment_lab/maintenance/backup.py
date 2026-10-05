@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -9,10 +11,44 @@ from pathlib import Path
 from uuid import uuid4
 
 from investment_lab import SCHEMA_VERSION, __version__
-from investment_lab.common import PROJECT, atomic_write, digest, now, read_json, within
+from investment_lab.common import PROJECT, atomic_write, digest, encoded, now, read_json, within
 from investment_lab.data.store import Store
+from investment_lab.data.universe import universe
 
 MANAGED = "investment-lab-backup-v1"
+
+
+def private_project_files():
+    """Explicit private handoff scope, never a recursive copy of the checkout."""
+    names = {"TASK_STATE.md", "config/universe.yaml", "docs/SPEC.md", "docs/ACCEPTANCE.md",
+             "docs/OPEN_RESOURCE_COVERAGE.md", "docs/STRATEGY_ASSISTANT.md", "docs/data_coverage.json"}
+    for pattern in ("*-verification.json", "*-delivery.json"):
+        names.update(path.relative_to(PROJECT).as_posix() for path in (PROJECT / "docs").glob(pattern))
+    names.update(path.relative_to(PROJECT).as_posix() for path in (PROJECT / "docs/changes").rglob("*.md"))
+    for name in sorted(names):
+        path = PROJECT / name
+        if path.exists():
+            if path.is_symlink() or not path.resolve().is_relative_to(PROJECT.resolve()):
+                raise ValueError("私有交接备份不跟随链接或项目外路径")
+            if path.is_file():
+                yield name, path
+
+
+def _has_secret(value):
+    if isinstance(value, dict):
+        return any(any(word in str(key).lower() for word in ("token", "secret", "password", "api_key"))
+                   or _has_secret(child) for key, child in value.items())
+    return any(_has_secret(child) for child in value) if isinstance(value, list) else False
+
+
+def _private_secret(payload, suffix):
+    text = payload.decode("utf-8-sig")
+    if suffix == ".json" and _has_secret(json.loads(text)):
+        return True
+    # Detect credential values, not documentation that merely names an environment variable.
+    return bool(re.search(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----|\bgh[pousr]_[A-Za-z0-9]{30,}|"
+                          r"\bgithub_pat_[A-Za-z0-9_]{30,}|\bAKIA[A-Z0-9]{16}\b|"
+                          r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", text))
 
 
 def backup_root(store):
@@ -48,8 +84,7 @@ def backup(store, destination=None):
                 cx.backup(dest)
             finally:
                 dest.close()
-        def archive(relative, path):
-            payload = path.read_bytes()
+        def archive_bytes(relative, payload):
             key = digest(payload)
             obj = root / "objects" / key[:2] / key
             if not obj.exists():
@@ -57,8 +92,10 @@ def backup(store, destination=None):
             if digest(obj.read_bytes()) != key:
                 raise ValueError("备份对象校验失败")
             objects[relative] = {"sha256": key, "bytes": len(payload)}
+        def archive(relative, path):
+            archive_bytes(relative, path.read_bytes())
         archive("state/index.sqlite", temp_db)
-        for area in ("user_strategies", "raw", "market", "manifests", "runs", "state"):
+        for area in ("user_strategies", "raw", "market", "manifests", "runs", "state", "handover"):
             for path in sorted((store.root / area).rglob("*")):
                 if not path.is_file() or path.suffix in (".tmp", ".log") or (area == "state" and path.suffix == ".lock") or "__pycache__" in path.parts or path.name.startswith("index.sqlite"):
                     continue
@@ -70,17 +107,28 @@ def backup(store, destination=None):
             path = store.root / "local_config" / name
             if path.exists():
                 value = read_json(path)
-                def has_secret(obj):
-                    if isinstance(obj, dict):
-                        return any(any(word in str(k).lower() for word in ("token", "secret", "password", "api_key")) or has_secret(v) for k, v in obj.items())
-                    return any(has_secret(v) for v in obj) if isinstance(obj, list) else False
-                if has_secret(value):
+                if _has_secret(value):
                     skipped.append("local_config/" + name + "：含敏感键，未备份")
                 else:
                     archive("local_config/" + name, path)
+        # Capture the effective fallback configuration without modifying the live configuration.
+        # Restores then use local_config/universe.json even when the public checkout has no private YAML.
+        effective = universe(store)
+        if _has_secret(effective):
+            skipped.append("local_config/universe.json：有效标的池含敏感键，未备份")
+        elif "local_config/universe.json" not in objects:
+            archive_bytes("local_config/universe.json", encoded(effective))
+        for name, path in private_project_files():
+            payload = path.read_bytes()
+            if _private_secret(payload, path.suffix):
+                skipped.append("handover/project/" + name + "：疑似包含凭据，未备份")
+                continue
+            archive_bytes("handover/project/" + name, payload)
         temp_db.unlink()
     manifest = {"format": MANAGED, "id": bid, "created": now(), "complete": True, "schema": SCHEMA_VERSION, "app_version": __version__,
-                "source": str(store.root), "files": objects, "skipped": skipped, "secrets": "未备份 API 密钥，恢复后重新输入", "protected": False}
+                "source": str(store.root), "files": objects, "skipped": skipped, "secrets": "未备份 API 密钥，恢复后重新输入", "protected": False,
+                "scope": {"private_project": "恢复到数据目录 handover/project；不覆盖源码目录",
+                          "effective_universe": "local_config/universe.json", "browser_storage": "未包含；浏览器需另行导出"}}
     atomic_write(staging / "manifest.json", manifest)
     atomic_write(staging / "manifest.sha256", digest(manifest).encode())
     final = root / "points" / bid
@@ -102,7 +150,8 @@ def verify(root, bid):
         if len(key) != 64 or any(c not in "0123456789abcdef" for c in key):
             raise ValueError("无效对象哈希")
         path = root / "objects" / key[:2] / key
-        if digest(path.read_bytes()) != key:
+        payload = path.read_bytes()
+        if digest(payload) != key or len(payload) != info["bytes"]:
             raise ValueError(f"备份文件校验失败 {name}")
     return manifest
 
