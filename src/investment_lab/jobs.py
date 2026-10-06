@@ -111,7 +111,7 @@ def create_run(store, request):
 
 
 def execute_run(store, run_id):
-    from investment_lab.engine.core import simulate
+    from investment_lab.engine.core import prepare_bars, simulate
     from investment_lab.research.experiments import benchmark_result, holdout, rolling
     run_dir = within(store.root / "runs", run_id)
     request = read_json(run_dir / "request.json")
@@ -120,7 +120,8 @@ def execute_run(store, run_id):
         with store.lock(), store.connect() as cx:
             cx.execute("UPDATE runs SET status=?,summary=? WHERE id=?", (value, encoded(summary).decode() if summary else None, run_id))
     progress_started = time.monotonic()
-    progress_clock = {"started": progress_started, "last_done": 0, "last_at": progress_started, "rate": None}
+    progress_clock = {"started": progress_started, "last_done": 0, "last_at": progress_started, "rate": None,
+                      "written_at": None}
     def progress(done, total):
         stamp = time.monotonic()
         delta_done = max(0, done - progress_clock["last_done"])
@@ -133,6 +134,11 @@ def execute_run(store, run_id):
             progress_clock.update(last_done=done, last_at=stamp)
         rate = progress_clock["rate"]
         remaining = max(0, total - done)
+        # The page polls about every 1.8 s; a locked file write per 10 sessions only slows long research.
+        written_at = progress_clock["written_at"]
+        if remaining and written_at is not None and stamp - written_at < .25:
+            return
+        progress_clock["written_at"] = stamp
         eta = remaining / rate if rate and remaining else 0 if not remaining else None
         with store.lock():
             atomic_write(run_dir / "progress.json", {"done": done, "total": total, "updated": now(),
@@ -146,6 +152,7 @@ def execute_run(store, run_id):
         if request["runtime_dependencies"] != runtime_dependencies():
             raise ValueError("实际运行依赖发生变化，请按依赖锁恢复环境")
         manifest, bars = store.load(request["snapshot"])
+        bars = prepare_bars(bars)
         config = Config(**request["config"])
         entry = within(run_dir / "strategy", request["strategy_entry"])
         def factory():

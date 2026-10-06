@@ -28,8 +28,12 @@ def money(value):
     return dec(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+# Reused instance: json.dumps would build an identical encoder on every call.
+_CANONICAL_JSON = json.JSONEncoder(ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str, allow_nan=False)
+
+
 def encoded(value):
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str, allow_nan=False).encode("utf-8")
+    return _CANONICAL_JSON.encode(value).encode("utf-8")
 
 
 def digest(value):

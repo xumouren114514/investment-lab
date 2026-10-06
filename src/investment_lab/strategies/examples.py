@@ -1,10 +1,23 @@
 from datetime import date
+from decimal import Decimal
 import json
 import math
 from pathlib import Path
 from statistics import pstdev
 
 from investment_lab.common import dec
+
+
+def _decimal(value):
+    """dec() without the string round trip for values that are already finite Decimals."""
+    return value if type(value) is Decimal and value.is_finite() else dec(value)
+
+
+def _missing_or_nonpositive(values):
+    """any(value is None or dec(value) <= 0 for value in values), vectorized for finite Decimal windows."""
+    if set(map(type, values)) <= {Decimal} and all(map(Decimal.is_finite, values)):
+        return bool(values) and min(values) <= 0
+    return any(value is None or dec(value) <= 0 for value in values)
 
 
 CATALOG = json.loads(Path(__file__).with_name("catalog.json").read_text(encoding="utf-8"))
@@ -27,9 +40,9 @@ def _weight_snapshot(ctx, symbols):
     prices = {}
     for symbol in symbols:
         values = ctx.history(symbol, 1, field="close")
-        if not values or values[-1] is None or dec(values[-1]) <= 0:
+        if not values or values[-1] is None or _decimal(values[-1]) <= 0:
             return None
-        prices[symbol] = dec(values[-1])
+        prices[symbol] = _decimal(values[-1])
     return {
         symbol: dec(ctx.positions.get(symbol, 0)) * prices[symbol] / equity
         for symbol in symbols
@@ -276,7 +289,7 @@ def _history_values(ctx, symbol, count, strategy, field="close", require_full=Tr
               message, **details)
         if require_full or not values:
             return None
-    if any(value is None or dec(value) <= 0 for value in values):
+    if _missing_or_nonpositive(values):
         details["missing_fields"] = [field or getattr(ctx, "_default_field", "history_default")]
         message = ("回撤价格缺失或非正，继续基础定投且不加码" if action == "base_purchase"
                    else "所需历史价格缺失或非正，跳过指标信号")
@@ -410,8 +423,8 @@ class Builtin:
                 window = int(p.get("window", 60))
                 prices = _history_values(ctx, symbol, window, self.name, action="base_purchase")
                 if prices is not None:
-                    peak = max(dec(value) for value in prices)
-                    drawdown = dec(1) - dec(prices[-1]) / peak
+                    peak = max(_decimal(value) for value in prices)
+                    drawdown = dec(1) - _decimal(prices[-1]) / peak
                     if drawdown >= dec(p.get("drawdown_threshold", "0.1")):
                         amount *= dec(p.get("multiplier", 2))
                 ctx.order_value(symbol, min(ctx.cash, amount), "周期定投；达到回撤阈值时加码")
@@ -470,7 +483,7 @@ class Builtin:
             for candidate in symbols:
                 prices = _history_values(ctx, candidate, window, self.name, field=None)
                 if prices:
-                    scores[candidate] = dec(prices[-1]) / dec(prices[0]) - 1
+                    scores[candidate] = _decimal(prices[-1]) / _decimal(prices[0]) - 1
             if scores and _scheduled(ctx, state, "last_period", p.get("frequency", "monthly")):
                 # Stable sorting preserves the original selected-symbol tie break.
                 winners = sorted(scores, key=lambda candidate: -scores[candidate])[:top_n]
@@ -500,14 +513,14 @@ class Builtin:
             history = _history_values(ctx, symbol, window, self.name, field=None, require_full=False,
                                       action="partial_window_signal") if symbol else None
             if history:
-                if dec(history[-1]) / max(dec(value) for value in history) - 1 <= -dec(p.get("threshold", "0.1")):
+                if _decimal(history[-1]) / max(_decimal(value) for value in history) - 1 <= -dec(p.get("threshold", "0.1")):
                     ctx.order_target_weight(symbol, weight, "历史高点回撤达到阈值")
         elif self.name == "drawdown_ladder":
             window = int(p.get("window", 120))
             prices = _history_values(ctx, symbol, window, self.name) if symbol else None
             if prices is not None:
-                peak = max(dec(value) for value in prices)
-                close = dec(prices[-1])
+                peak = max(_decimal(value) for value in prices)
+                close = _decimal(prices[-1])
                 drawdown = dec(1) - close / peak
                 if close >= peak:
                     state["steps"] = 0

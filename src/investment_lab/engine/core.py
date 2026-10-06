@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+from bisect import bisect_left
 from copy import deepcopy
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING
 from types import MappingProxyType
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from investment_lab.common import dec, digest, money
+from investment_lab.common import dec, digest, encoded, money
 from .account import Account, ZERO
 from .models import Config, Order
 from .cash_flows import MONTHLY_RULE, resolve_cash_flows
@@ -24,18 +26,55 @@ def is_shanghai_star_stock(security, symbol):
     return len(symbol_code) == 6 and symbol_code.startswith("688") and identity == symbol_code
 
 
+_UNCONVERTED = object()
+_ATOMIC_TYPES = frozenset((str, int, float, bool, type(None), Decimal))
+
+
+class _NotPlainData(Exception):
+    pass
+
+
+def _copy_plain(value, seen):
+    kind = type(value)
+    if kind in _ATOMIC_TYPES:
+        return value
+    if kind is not dict and kind is not list or id(value) in seen:
+        raise _NotPlainData
+    seen.add(id(value))
+    if kind is list:
+        return [_copy_plain(item, seen) for item in value]
+    copied = {}
+    for key, item in value.items():
+        if type(key) not in _ATOMIC_TYPES:
+            raise _NotPlainData
+        copied[key] = _copy_plain(item, seen)
+    return copied
+
+
+def _deep_copy(value):
+    """Same result as deepcopy for JSON-like data; shared, cyclic or other objects use deepcopy."""
+    try:
+        return _copy_plain(value, set())
+    except _NotPlainData:
+        return deepcopy(value)
+
+
 class Context:
     """Only copies of already available bars/account values are exposed. Trusted Python, not a security sandbox."""
-    def __init__(self, day, rows, account, equity, pending, submit, symbols, params, state, securities, mode, diagnostic=None):
-        self.date, self.symbols, self.params, self.state = day, tuple(symbols), deepcopy(params), state
+    def __init__(self, day, rows, account, equity, pending, submit, symbols, params, state, securities, mode, diagnostic=None,
+                 value_cache=None):
+        self.date, self.symbols, self.params, self.state = day, tuple(symbols), _deep_copy(params), state
         self.cash, self.debt, self.equity = account.cash, account.debt, equity
         self.positions = dict(account.positions)
-        self.pending = deepcopy(pending)
+        self.pending = _deep_copy(pending)
+        self._history_rows = rows
         self._rows = MappingProxyType({symbol: _HistoryView(values) for symbol, values in rows.items()})
         self._submit = submit
         self._diagnostic = diagnostic
         self._multipliers = {s: dec(securities[s].get("multiplier", 1)) for s in symbols}
         self._default_field = "close" if mode in ("close_research", REFERENCE_MODE) else "vwap_value"
+        # Decimal values of the append-only histories, shared by the sessions of one simulation.
+        self._values = {} if value_cache is None else value_cache
 
     def note(self, code, message, **details):
         """Record a bounded diagnostic without changing orders or the strategy clock."""
@@ -46,12 +85,28 @@ class Context:
         if count < 1:
             raise ValueError("窗口须为正")
         field = field or self._default_field
-        return [dec(row[field]) if row.get(field) is not None else None for row in self._rows.get(symbol, [])[-count:]]
+        rows = self._history_rows.get(symbol)
+        # Same window bounds (and errors for invalid counts) as rows[-count:].
+        start, end, _ = slice(-count, None).indices(len(rows) if rows is not None else 0)
+        if rows is None:
+            return []
+        key = (symbol, field)
+        values = self._values.get(key)
+        if values is None:
+            values = self._values[key] = []
+        if len(values) < end:
+            values.extend([_UNCONVERTED] * (end - len(values)))
+        # Convert only rows inside the requested window, once per simulation.
+        for position in range(start, end):
+            if values[position] is _UNCONVERTED:
+                row = rows[position]
+                values[position] = dec(row[field]) if row.get(field) is not None else None
+        return values[start:end]
 
     def bars(self, symbol, count=20):
         if count < 1:
             raise ValueError("窗口须为正")
-        return [dict(row) for row in self._rows.get(symbol, ())[-count:]]
+        return [dict(row) for row in self._history_rows.get(symbol, ())[-count:]]
 
     def order_shares(self, symbol, quantity, reason="策略订单"):
         return self._submit(symbol, dec(quantity), reason)
@@ -88,6 +143,157 @@ class _HistoryView:
         return MappingProxyType(value)
 
 
+class _SymbolBars:
+    """Per-symbol lookups over prepared bars, reused by every research window.
+
+    Cached values are derived only from the immutable bar dictionaries and are
+    exact replacements for the per-call scans they avoid; any irregular input
+    (unsorted dates, malformed timestamps, failing reference rows) falls back
+    to the original computation so results and error messages are unchanged.
+    """
+    __slots__ = ("rows", "by_date", "_dates", "_encoded", "_checkpoints", "_late", "_available",
+                 "_available_error", "_reference_clean")
+    _CHECKPOINT = 32
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.by_date = {row["date"]: row for row in rows}
+        dates = [row["date"] for row in rows]
+        ordered = all(isinstance(day, str) for day in dates) and all(a < b for a, b in zip(dates, dates[1:]))
+        self._dates = dates if ordered else None
+        self._encoded, self._late = {}, {}
+        self._checkpoints = [hashlib.sha256(b"[")]
+        self._available, self._available_error = [], None
+        self._reference_clean = None
+
+    @property
+    def ordered(self):
+        return self._dates is not None
+
+    def before(self, first):
+        """Equals [row for row in rows if row["date"] < first]."""
+        if self._dates is not None:
+            return self.rows[:bisect_left(self._dates, first)]
+        return [row for row in self.rows if row["date"] < first]
+
+    def encoded(self, row):
+        # Rows stay referenced by self.rows, so their ids are stable for this cache's lifetime.
+        key = id(row)
+        value = self._encoded.get(key)
+        if value is None:
+            value = self._encoded[key] = encoded(row)
+        return value
+
+    def prefix_hasher(self, count):
+        """sha256 state of '[' plus the first `count` encoded rows joined by commas (ordered rows only)."""
+        step, checkpoints, rows = self._CHECKPOINT, self._checkpoints, self.rows
+        target = count // step
+        while len(checkpoints) <= target:
+            index = len(checkpoints) - 1
+            hasher = checkpoints[index].copy()
+            for position in range(index * step, (index + 1) * step):
+                if position:
+                    hasher.update(b",")
+                hasher.update(self.encoded(rows[position]))
+            checkpoints.append(hasher)
+        hasher = checkpoints[target].copy()
+        for position in range(target * step, count):
+            if position:
+                hasher.update(b",")
+            hasher.update(self.encoded(rows[position]))
+        return hasher
+
+    def late(self, row, timezone_name):
+        """Equals available_at > 23:59:59 local time of the bar's own session day."""
+        key = (id(row), timezone_name)
+        value = self._late.get(key)
+        if value is None:
+            cutoff = datetime.combine(date.fromisoformat(row["date"]), time(23, 59, 59), ZoneInfo(timezone_name))
+            value = self._late[key] = datetime.fromisoformat(row["available_at"]) > cutoff
+        return value
+
+    def warm_late(self, count, cutoff):
+        """any(available_at > cutoff) over the first `count` ordered rows, or None to use the original scan."""
+        maxima, rows = self._available, self.rows
+        while len(maxima) < count and self._available_error is None:
+            position = len(maxima)
+            try:
+                parsed = datetime.fromisoformat(rows[position]["available_at"])
+                aware = parsed.utcoffset() is not None
+            except Exception:
+                aware = False
+            if not aware:
+                self._available_error = position
+                break
+            maxima.append(parsed if not maxima or parsed > maxima[-1] else maxima[-1])
+        if self._available_error is not None and self._available_error < count:
+            return None
+        return count > 0 and maxima[count - 1] > cutoff
+
+    def reference_clean(self):
+        """True when no row of this symbol can fail the reference-mode price checks."""
+        if self._reference_clean is None:
+            try:
+                self._reference_clean = all(
+                    isinstance(row["date"], str) and row.get("price_basis") == REFERENCE_BASIS
+                    and row.get("source") == "Yahoo/chart" and dec(row["close"]) > 0 and dec(row["volume"]) >= 0
+                    for row in self.rows)
+            except Exception:
+                self._reference_clean = False
+        return self._reference_clean
+
+
+class PreparedBars(list):
+    """A snapshot's bars plus per-symbol caches shared by research windows and benchmarks.
+
+    It is still the original list of bar dictionaries; those dictionaries must
+    not be modified while the prepared object is in use.
+    """
+    def __init__(self, bars):
+        super().__init__(bars)
+        groups = {}
+        for bar in self:
+            groups.setdefault(bar["symbol"], []).append(bar)
+        self._groups, self._symbols = groups, {}
+
+    def symbol(self, symbol):
+        prepared = self._symbols.get(symbol)
+        if prepared is None:
+            prepared = self._symbols[symbol] = _SymbolBars(self._groups.get(symbol, []))
+        return prepared
+
+
+def prepare_bars(bars):
+    return bars if isinstance(bars, PreparedBars) else PreparedBars(bars)
+
+
+class _HistoryDigest:
+    """Incremental common.digest(rows) for one append-only history list.
+
+    The canonical JSON of a list is "[" + ",".join(item encodings) + "]", so
+    each known bar is encoded once instead of re-serializing the full history
+    on every order. The hex digest is identical to digest(rows).
+    """
+    __slots__ = ("_source", "_hasher", "_count")
+
+    def __init__(self, source, seeded=0):
+        # `seeded` leading rows equal source.rows[:seeded] and come from shared checkpoints.
+        self._source, self._hasher, self._count = source, None, seeded
+
+    def __call__(self, rows):
+        hasher = self._hasher
+        if hasher is None:
+            hasher = self._hasher = self._source.prefix_hasher(self._count) if self._count else hashlib.sha256(b"[")
+        for position in range(self._count, len(rows)):
+            if position:
+                hasher.update(b",")
+            hasher.update(self._source.encoded(rows[position]))
+        self._count = len(rows)
+        final = hasher.copy()
+        final.update(b"]")
+        return final.hexdigest()
+
+
 def rule_for(config, security, symbol, day):
     star = is_shanghai_star_stock(security, symbol)
     lot = 1 if star else security.get("lot", 1)
@@ -112,6 +318,10 @@ def rule_for(config, security, symbol, day):
 
 
 def preflight(manifest, bars, config):
+    return _preflight(manifest, prepare_bars(bars), config)
+
+
+def _preflight(manifest, bars, config):
     from investment_lab.data.compose import validate_composed_selection
     validate_composed_selection(manifest, config)
     securities = manifest["securities"]
@@ -121,12 +331,14 @@ def preflight(manifest, bars, config):
     if reference:
         if not reference_available(manifest, config.symbols):
             raise ValueError("参考研究仅支持已识别的 Yahoo 股票/ETF 参考序列；不能绕过其他执行限制")
-        for bar in bars:
-            if bar["symbol"] in config.symbols and bar["date"] <= config.end:
-                if bar.get("price_basis") != REFERENCE_BASIS or bar.get("source") != "Yahoo/chart":
-                    raise ValueError(f"{bar['symbol']}/{bar['date']}: 参考价格口径混合或未知，不能自动拼接")
-                if dec(bar["close"]) <= 0 or dec(bar["volume"]) < 0:
-                    raise ValueError("参考价格或成交量无效")
+        # The full ordered scan only runs when a selected row could fail, keeping its first error.
+        if not all(bars.symbol(s).reference_clean() for s in config.symbols):
+            for bar in bars:
+                if bar["symbol"] in config.symbols and bar["date"] <= config.end:
+                    if bar.get("price_basis") != REFERENCE_BASIS or bar.get("source") != "Yahoo/chart":
+                        raise ValueError(f"{bar['symbol']}/{bar['date']}: 参考价格口径混合或未知，不能自动拼接")
+                    if dec(bar["close"]) <= 0 or dec(bar["volume"]) < 0:
+                        raise ValueError("参考价格或成交量无效")
     selected = [securities[s] for s in config.symbols]
     if len({s["market"] for s in selected}) != 1 or len({s["currency"] for s in selected}) != 1:
         raise ValueError("每次回测仅允许一个市场和一种币种")
@@ -138,8 +350,8 @@ def preflight(manifest, bars, config):
     if config.start < min(manifest["sessions"]) or config.end > max(manifest["sessions"]):
         raise ValueError("请求区间超出快照日历范围")
     resolve_cash_flows(config.cash_flows, sessions, config.start, config.end)
-    index = {(b["symbol"], b["date"]): b for b in bars}
     for symbol, sec in zip(config.symbols, selected):
+        symbol_bars = bars.symbol(symbol)
         star_rule_replaces_legacy_block = (
             is_shanghai_star_stock(sec, symbol)
             and sec.get("execution_blocked") == STAR_BOARD_RULE_NOT_IMPLEMENTED
@@ -159,11 +371,10 @@ def preflight(manifest, bars, config):
                 raise ValueError("期货参数无效")
         eligible = [d for d in sessions if (not sec.get("listed") or d >= sec["listed"]) and (not sec.get("delisted") or d <= sec["delisted"])]
         for day in eligible:
-            bar = index.get((symbol, day))
+            bar = symbol_bars.by_date.get(day)
             if bar is None:
                 raise ValueError(f"{symbol}/{day}: 缺少行情/明确停牌状态")
-            cutoff = datetime.combine(date.fromisoformat(day), time(23, 59, 59), ZoneInfo(sec["timezone"]))
-            if datetime.fromisoformat(bar["available_at"]) > cutoff:
+            if symbol_bars.late(bar, sec["timezone"]):
                 raise ValueError(f"{symbol}/{day}: 数据晚于当日决策窗口，须另建执行日偏移")
             if sec.get("kind") == "future" and not bar.get("settlement"):
                 raise ValueError("期货缺少结算价")
@@ -173,9 +384,12 @@ def preflight(manifest, bars, config):
                 raise ValueError(f"{symbol}/{day}: 严格 VWAP 不可用或口径未验证")
             if config.mode == "estimated_vwap" and not bar.get("vwap_value"):
                 raise ValueError(f"{symbol}/{day}: 没有明确估算 VWAP，不能从 OHLCV 静默推导")
-        warm = [b for b in bars if b["symbol"] == symbol and b["date"] < sessions[0]]
+        warm = symbol_bars.before(sessions[0])
         first_cutoff = datetime.combine(date.fromisoformat(sessions[0]), time(23, 59, 59), ZoneInfo(sec["timezone"]))
-        if any(datetime.fromisoformat(b["available_at"]) > first_cutoff for b in warm):
+        late = symbol_bars.warm_late(len(warm), first_cutoff) if symbol_bars.ordered else None
+        if late is None:
+            late = any(datetime.fromisoformat(b["available_at"]) > first_cutoff for b in warm)
+        if late:
             raise ValueError(f"{symbol}: 预热数据在决策时尚不可用")
         if len(warm) < config.warmup:
             raise ValueError(f"{symbol}: 预热窗口不足")
@@ -183,11 +397,12 @@ def preflight(manifest, bars, config):
 
 
 def simulate(manifest, bars, config: Config, strategy, params=None, progress=None):
-    sessions = preflight(manifest, bars, config)
+    bars = prepare_bars(bars)
+    sessions = _preflight(manifest, bars, config)
     cash_flows = resolve_cash_flows(config.cash_flows, sessions, config.start, config.end)
     reference = config.mode == REFERENCE_MODE
     securities = manifest["securities"]
-    index = {(b["symbol"], b["date"]): b for b in bars}
+    symbol_bars = {s: bars.symbol(s) for s in config.symbols}
     account = Account(config.initial_cash)
     pending, trades, orders, curve, notes = [], [], [], [], []
     strategy_diagnostics, diagnostic_keys = [], set()
@@ -216,28 +431,51 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
         strategy_diagnostics.append(item)
     if reference:
         notes.append(REFERENCE_WARNING)
-    histories = {s: [b for b in bars if b["symbol"] == s and b["date"] < sessions[0]] for s in config.symbols}
+    histories = {s: symbol_bars[s].before(sessions[0]) for s in config.symbols}
     prices = {s: dec(histories[s][-1]["close"]) for s in config.symbols if histories[s]}
+    history_digests = {s: _HistoryDigest(symbol_bars[s], len(histories[s]) if symbol_bars[s].ordered else 0)
+                       for s in config.symbols}
+    history_values = {}
+    # Trading rules are pure functions of (symbol, day): reuse them within a session, or for the
+    # whole run when no dated rule overrides exist.
+    rule_cache = {}
+
+    def trading_rule(symbol, day):
+        rule = rule_cache.get(symbol)
+        if rule is None:
+            rule = rule_cache[symbol] = rule_for(config, securities[symbol], symbol, day)
+        return rule
+    actions_by_day = {}
+    if not reference:
+        for action in manifest["actions"]:
+            actions_by_day.setdefault(action["date"], []).append(action)
+    annual_rate = dec(config.annual_interest)
+    slippage = dec(config.slippage_bps)
+    participation = dec(config.max_participation)
+    max_leverage = dec(config.max_leverage)
     state, next_id = {}, 1
     bankrupt = False
     for session_index, day in enumerate(sessions):
+        if config.rules:
+            rule_cache.clear()
         previous_day = sessions[session_index - 1] if session_index else day
         elapsed = (date.fromisoformat(day) - date.fromisoformat(previous_day)).days
-        rate = dec(config.annual_interest)
+        rate = annual_rate
         # Integrate rate changes across calendar days, including weekends.
-        if elapsed:
-            from datetime import timedelta
+        if elapsed and config.rate_curve:
             daily = []
             for n in range(elapsed):
                 interest_day = (date.fromisoformat(previous_day) + timedelta(days=n)).isoformat()
                 candidates = [k for k in config.rate_curve if k <= interest_day]
                 daily.append(dec(config.rate_curve[max(candidates)]) if candidates else rate)
             rate = sum(daily, ZERO) / dec(elapsed)
+        elif elapsed:
+            rate = sum([annual_rate] * elapsed, ZERO) / dec(elapsed)
         flow = money(cash_flows.get(day, 0))
         account.cash_events(day, session_index, elapsed, rate, flow)
-        rows = {s: index[(s, day)] for s in config.symbols if (s, day) in index}
-        for action in ([] if reference else manifest["actions"]):
-            if action["date"] == day and action["symbol"] in config.symbols:
+        rows = {s: row for s in config.symbols if (row := symbol_bars[s].by_date.get(day)) is not None}
+        for action in actions_by_day.get(day, ()):
+            if action["symbol"] in config.symbols:
                 account.action(day, action)
                 if action["type"] == "split":
                     symbol, ratio = action["symbol"], dec(action["ratio"])
@@ -260,15 +498,15 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
             elif sec.get("kind") == "future" and day >= sec["expiry"] and order.remaining > 0:
                 failure = "到期日不新开仓"
             if failure is None:
-                rule = rule_for(config, sec, order.symbol, day)
+                rule = trading_rule(order.symbol, day)
                 lot = dec(rule["lot"])
                 raw_price = dec(bar["close"] if config.mode in ("close_research", REFERENCE_MODE) else bar["vwap_value"])
                 sign = dec(1 if order.remaining > 0 else -1)
-                price = raw_price * (1 + sign * dec(config.slippage_bps) / 10000)
+                price = raw_price * (1 + sign * slippage / 10000)
                 if sec.get("kind") == "future":
                     tick = dec(sec["tick"])
                     price = (price / tick).to_integral_value(rounding=ROUND_CEILING if sign > 0 else ROUND_FLOOR) * tick
-                volume_budget = max(ZERO, dec(bar["volume"]) * dec(config.max_participation) - used_volume.get(order.symbol, ZERO))
+                volume_budget = max(ZERO, dec(bar["volume"]) * participation - used_volume.get(order.symbol, ZERO))
                 requested = min(abs(order.remaining), volume_budget)
                 if sign < 0:
                     sellable = account.positions.get(order.symbol, ZERO) - (account.bought_today.get(order.symbol, ZERO) if int(rule["sell_delay"]) else ZERO)
@@ -278,23 +516,31 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                 if sign < 0 and requested == account.positions.get(order.symbol, ZERO):
                     qty = requested
                 multiplier = dec(sec.get("multiplier", 1))
+                minimum_commission, commission_bps = dec(rule["minimum_commission"]), dec(rule["commission_bps"])
+                sell_tax_bps = dec(rule["sell_tax_bps"])
                 def fees(q):
                     notional = q * price * multiplier
-                    return money(max(dec(rule["minimum_commission"]), notional * dec(rule["commission_bps"]) / 10000) + (notional * dec(rule["sell_tax_bps"]) / 10000 if sign < 0 else ZERO)) if q else ZERO
+                    return money(max(minimum_commission, notional * commission_bps / 10000) + (notional * sell_tax_bps / 10000 if sign < 0 else ZERO)) if q else ZERO
+                # The account and marks do not change while one order is sized, so the
+                # quantity-independent valuations are computed once per order.
+                valuation = []
                 def affordable(q):
+                    if not valuation:
+                        marks = {**prices, order.symbol: price}
+                        valuation.extend((account.equity(marks, securities), account.exposure(marks, securities),
+                                          account.margin(marks, securities)))
+                    current_equity, current_exposure, reserved_margin = valuation
                     cost = q * price * multiplier
-                    marks = {**prices, order.symbol: price}
-                    eq = account.equity(marks, securities) - fees(q)
-                    exp = account.exposure(marks, securities) + cost
-                    allowed_leverage = dec(config.max_leverage) if sec.get("margin_eligible", False) or sec.get("kind") == "future" else dec(1)
+                    eq = current_equity - fees(q)
+                    exp = current_exposure + cost
+                    allowed_leverage = max_leverage if sec.get("margin_eligible", False) or sec.get("kind") == "future" else dec(1)
                     if eq <= 0 or exp > eq * allowed_leverage:
                         return False
                     if sec.get("kind") == "future":
-                        required = account.margin(marks, securities) + cost * dec(sec["initial_margin"]) + fees(q)
+                        required = reserved_margin + cost * dec(sec["initial_margin"]) + fees(q)
                         return required <= account.cash and account.debt == 0
                     if allowed_leverage == 1:
-                        return money(cost) + fees(q) <= account.cash - account.margin(marks, securities)
-                    reserved_margin = account.margin(marks, securities)
+                        return money(cost) + fees(q) <= account.cash - reserved_margin
                     return not reserved_margin or money(cost) + fees(q) <= account.cash - reserved_margin
                 if sign > 0 and qty:
                     low, high = 0, int(qty / lot)
@@ -386,7 +632,7 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
             sec = securities[symbol]
             if (sec.get("listed") and day < sec["listed"]) or (sec.get("delisted") and day >= sec["delisted"]):
                 raise ValueError("下单日期不在挂牌期")
-            lot = dec(rule_for(config, sec, symbol, day)["lot"])
+            lot = dec(trading_rule(symbol, day)["lot"])
             if quantity != -account.positions.get(symbol, ZERO):
                 quantity = (abs(quantity) / lot).to_integral_value(rounding=ROUND_FLOOR) * lot * (1 if quantity > 0 else -1)
             if not quantity:
@@ -394,8 +640,8 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
             queued_sells = sum((abs(o.remaining) for o in pending if o.symbol == symbol and o.remaining < 0), ZERO)
             if quantity < 0 and abs(quantity) + queued_sells > account.positions.get(symbol, ZERO):
                 raise ValueError("禁止净空头，卖单超过已有可持有数量")
-            visible = {"through": day, "reference_close": str(prices.get(symbol)), "equity": str(equity), "history_hash": digest(histories.get(symbol, []))}
-            sell_rule = rule_for(config, sec, symbol, day)
+            visible = {"through": day, "reference_close": str(prices.get(symbol)), "equity": str(equity), "history_hash": history_digests[symbol](histories[symbol])}
+            sell_rule = trading_rule(symbol, day)
             odd_lot_liquidation = (quantity < 0 and abs(quantity) < dec(sell_rule["minimum_sell_quantity"])
                                    and abs(quantity) == account.positions.get(symbol, ZERO) and queued_sells == 0)
             order = Order(next_id, symbol, quantity, quantity, day, str(reason), visible, forced=forced,
@@ -415,7 +661,8 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                     submit(symbol, -qty, "维持保证金不足，下一交易日减仓", True)
             account.event(day, "margin_call", equity=equity, exposure=exposure)
         elif day != sessions[-1]:
-            ctx = Context(day, histories, account, equity, [{"symbol": o.symbol, "remaining": str(o.remaining)} for o in pending], submit, config.symbols, params or {}, state, securities, config.mode, record_diagnostic)
+            ctx = Context(day, histories, account, equity, [{"symbol": o.symbol, "remaining": str(o.remaining)} for o in pending], submit, config.symbols, params or {}, state, securities, config.mode, record_diagnostic,
+                          history_values)
             if session_index == 0 and hasattr(strategy, "initialize"):
                 strategy.initialize(ctx)
             strategy.on_session(ctx)

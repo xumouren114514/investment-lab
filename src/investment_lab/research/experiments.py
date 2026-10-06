@@ -3,7 +3,7 @@ from dataclasses import asdict, replace
 from datetime import date
 import numpy as np
 
-from investment_lab.engine.core import simulate
+from investment_lab.engine.core import prepare_bars, simulate
 from investment_lab.engine.reference import REFERENCE_MODE, REFERENCE_WARNING
 from investment_lab.engine.cash_flows import MONTHLY_RULE
 
@@ -27,6 +27,8 @@ def benchmark_result(manifest, bars, config, progress=None):
 def rolling(manifest, bars, config, factory, params, interval="month", horizon=60, end_mode="fixed_length", progress=None):
     if interval not in ("day", "month", "quarter", "year") or end_mode not in ("fixed_length", "common_end") or horizon < 2:
         raise ValueError("滚动参数无效")
+    # Index the frozen bars once; every window and benchmark reuses the same lookups.
+    bars = prepare_bars(bars)
     days = [d for d in manifest["sessions"] if config.start <= d <= config.end]
     starts, seen = [], set()
     for i, d in enumerate(days):
@@ -90,6 +92,7 @@ def rolling(manifest, bars, config, factory, params, interval="month", horizon=6
 def holdout(manifest, bars, config, factory, params, test_start, gap_sessions=0, progress=None):
     if gap_sessions < 0:
         raise ValueError("隔离间隔不得为负")
+    bars = prepare_bars(bars)
     days = [d for d in manifest["sessions"] if config.start <= d <= config.end]
     if test_start not in days:
         raise ValueError("留出起点必须是交易日")
