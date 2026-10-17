@@ -14,4 +14,5 @@
 - GitHub Pages 只托管静态文件，不运行 FastAPI/SQLite。当前本机应用没有登录或租户隔离，也会执行可信模型 Python 策略，禁止直接暴露至公网。浏览器版仅运行内置策略，数据留在访客浏览器。
 - 迁移和恢复先做一致性备份，恢复到新目录。备份清理默认只预览，禁止删除唯一副本。
 - 普通数据备份保存有效标的池至 `local_config/universe.json`，并将明确列出的私有交接资料存入 `handover/project/`；恢复不覆盖源码。浏览器存储不在该备份范围内，须单独导出。旧备份点只具有其当时清单列出的范围。
+- 文件与备份：遵守 `D:\deepseek\_admin\FILE_POLICY_SUMMARY.md`（全机文件与备份规范摘要 v1.0）；与本文件冲突时以本文件为准，并把冲突点告诉用户。已知差异：数据和备份目录沿用项目外同级的 `investment_lab_data`、`investment_lab_backups`，未经用户批准不迁移；新的恢复演练和审计目录放在 `D:\deepseek\_tmp\investment_lab\` 下。
 - 阶段结束或中断前保存当前事实、缺口、验证和下一步。不得把离线测试当作真实数据验收。
