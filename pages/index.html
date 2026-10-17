@@ -3,98 +3,206 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f6fb">
-  <title>投资研究室 · 浏览器版</title>
-  <link rel="stylesheet" href="./app.css?v=20261005-1">
-  <script src="./ui-utils.js?v=20261005-1"></script>
-  <script src="./strategy-forms.js?v=20261005-1"></script>
-  <script src="./portable-data.js" defer></script>
-  <script type="module" src="./app.js?v=20261005-1"></script>
+  <meta name="color-scheme" content="light dark">
+  <title>投资研究室浏览器版</title>
+  <meta name="description" content="在浏览器里运行可复现的日线回测：导入行情快照，选择内置策略与交易假设，计算和数据都留在本机浏览器。">
+  <link rel="stylesheet" href="./theme.css?v=20261007-1">
+  <link rel="stylesheet" href="./app.css?v=20261007-1">
+  <script src="./ui-utils.js?v=20261007-1"></script>
+  <script src="./theme-boot.js?v=20261007-1"></script>
+  <script src="./strategy-forms.js?v=20261007-1"></script>
+  <script src="./strategy-editor.js?v=20261007-1"></script>
+  <script src="./snapshot-selection.js?v=20261007-1"></script>
+  <script src="./result-views.js?v=20261007-1"></script>
+  <script src="./charts.js?v=20261007-1"></script>
+  <script src="./portable-data.js?v=20261007-1" defer></script>
+  <script type="module" src="./app.js?v=20261007-1"></script>
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="./" aria-label="投资研究室首页"><span class="brand-mark">研</span><span>投资研究室<small>浏览器本地版</small></span></a>
-    <div class="privacy-pill"><span aria-hidden="true">●</span> 行情、策略与结果保存在此浏览器</div>
-  </header>
-  <main>
-    <section class="intro">
-      <div>
-        <p class="eyebrow">开源 · 本地计算 · 可复现</p>
-        <h1>先核对数据，<br>再研究策略。</h1>
-        <p class="intro-copy">在你的浏览器里运行日线回测。导入快照数据包，选择策略与假设；计算在本机完成，不会把行情或结果上传到网站。</p>
-      </div>
-      <div class="intro-note"><strong>研究用途</strong><p>结果受数据质量、费用和历史规则假设影响，不构成投资建议或实际成交记录。</p><span>价格、拆股、分红和 VWAP 缺口会按研究模式明确检查。</span></div>
-    </section>
-
-    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
-
-    <section class="panel data-panel" aria-labelledby="data-title">
-      <div class="section-heading"><div><p class="eyebrow">01 · 固定研究输入</p><h2 id="data-title">数据快照</h2></div><span id="storage-label" class="muted">正在读取本机存储…</span></div>
-      <p class="help">导入你有权用于研究的 `.json.gz` 快照。网站只处理你主动导入的文件，数据保存在当前浏览器，其他访问者无法读取；分享快照前请确认数据源许可允许再分发。不同设备或浏览器需要分别导入。</p>
-      <div class="toolbar">
-        <label class="file-picker">导入快照<input id="package-file" type="file" accept=".gz,application/gzip"></label>
-        <button id="demo-package" class="secondary">添加 5 日合成演示</button>
-        <button id="export-backup" class="secondary" disabled>备份本机数据</button>
-        <label class="file-picker">恢复备份<input id="backup-file" type="file" accept=".gz,application/gzip"></label>
-      </div>
-      <p id="package-status" class="help" role="status" aria-live="polite"></p>
-      <div id="snapshot-list" class="snapshot-list" role="group" aria-label="选择用于本次回测的数据快照"></div>
-      <div id="symbol-list" class="symbol-list"></div>
-      <p id="strategy-scope-note" class="help"></p>
-    </section>
-
-    <section class="panel" aria-labelledby="research-title">
-      <div class="section-heading"><div><p class="eyebrow">02 · 研究假设</p><h2 id="research-title">回测配置</h2></div><span class="muted">配置草稿自动保存在此浏览器</span></div>
-      <form id="research-form">
-        <div class="field-grid">
-          <label>策略<select id="strategy"><option value="">正在读取策略目录…</option></select></label>
-          <label>研究方式<select id="kind"><option value="single">单次回测</option><option value="rolling">滚动起点回测</option><option value="holdout">开发区间 / 留出验证</option></select></label>
-          <label>开始日期<input id="start" type="date" required></label>
-          <label>结束日期<input id="end" type="date" required></label>
-          <label>初始资金<input id="cash" type="number" min="1" step="any" value="100000" required></label>
-          <label>最大杠杆<input id="leverage" type="number" min="1" max="10" step="0.1" value="1"></label>
-          <label>成交价格模式<select id="mode"><option value="strict_vwap">严格 VWAP · 缺口阻止运行</option><option value="estimated_vwap">估算 VWAP · 显式标记</option><option value="close_research">收盘价研究 · 不进正常排名</option><option value="reference_research">参考历史价格 · 非实际成交</option></select></label>
-          <label>基准<select id="benchmark"><option value="">不设置</option></select></label>
+    <a class="brand" href="./" aria-label="投资研究室浏览器版首页">
+      <span class="brand-mark" aria-hidden="true">研</span>
+      <span class="brand-name">投资研究室<small>浏览器版</small></span>
+    </a>
+    <p class="privacy-note">行情、配置和结果只保存在这个浏览器</p>
+    <div class="topbar-tools">
+      <button type="button" id="prefs-button" class="quiet" aria-expanded="false" aria-controls="prefs-panel">显示设置</button>
+      <div id="prefs-panel" class="prefs-panel" hidden>
+        <div>
+          <span class="prefs-label" id="theme-label">外观</span>
+          <div class="segmented" role="group" aria-labelledby="theme-label">
+            <button type="button" data-theme-choice="auto">跟随系统</button>
+            <button type="button" data-theme-choice="light">浅色</button>
+            <button type="button" data-theme-choice="dark">深色</button>
+          </div>
         </div>
-        <fieldset class="funding-fields"><legend>资金计划</legend><label>每月自动入金（可选）<input id="monthly-deposit" type="number" min="0" step="0.01" placeholder="留空表示不定期入金"><span class="help">每个自然月的首个交易日入账，首月也会计入；只增加现金，不会自动买入。</span></label><p id="funding-status" class="help" role="status" aria-live="polite"></p></fieldset>
-        <section class="strategy-parameter-panel" aria-labelledby="strategy-parameters-title">
-          <div class="section-heading"><h3 id="strategy-parameters-title">策略参数</h3><span id="strategy-count" class="muted"></span></div>
-          <div id="strategy-parameter-fields" aria-live="polite"></div>
-          <p id="strategy-parameter-status" class="help" role="status" aria-live="polite"></p>
-        </section>
-        <details class="advanced">
-          <summary>高级设置：费用、JSON 参数与研究方式</summary>
-          <div class="field-grid">
-            <label>佣金（基点）<input id="commission" type="number" min="0" step="any" value="3"></label>
-            <label>最低佣金<input id="minimum-commission" type="number" min="0" step="any" value="0"></label>
-            <label>滑点（基点）<input id="slippage" type="number" min="0" step="any" value="5"></label>
-            <label>年融资利率<input id="interest" type="number" min="0" step="0.01" value="0.06"></label>
-            <label>策略参数（JSON）<textarea id="params" rows="3">{"weight":0.95}</textarea><span class="help">适用于专业参数。月度动态等权还支持 month_end_dates（指定检查日期；留空时用下月首个交易日代理月末）。</span></label>
-            <label>额外入金 / 提款（JSON）<textarea id="flows" rows="3">{}</textarea><span class="help">用于特殊日期金额；每月入金请使用上方“资金计划”输入框，避免重复填写。</span></label>
+        <div>
+          <span class="prefs-label" id="gain-label">涨跌颜色</span>
+          <div class="segmented" role="group" aria-labelledby="gain-label">
+            <button type="button" data-gain-choice="red">红涨绿跌</button>
+            <button type="button" data-gain-choice="green">绿涨红跌</button>
           </div>
-          <div id="rolling-fields" class="field-grid" hidden>
-            <label>起点间隔<select id="interval"><option value="month">每月</option><option value="day">每日</option><option value="quarter">每季</option><option value="year">每年</option></select></label>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro" aria-labelledby="intro-title">
+      <div class="intro-copy">
+        <h1 id="intro-title">先核对数据，再研究策略。</h1>
+        <p>导入你有权使用的行情快照，选择内置策略和交易假设，回测在浏览器里完成。行情和结果不会上传到网站；结果受数据质量与假设影响，不构成投资建议或实际成交记录。</p>
+        <div class="row">
+          <label class="btn primary file-button">导入快照<input id="package-file" type="file" accept=".gz,application/gzip"></label>
+          <button type="button" id="demo-package">试用五日合成演示</button>
+        </div>
+      </div>
+      <ol class="timeline-steps" aria-label="每个交易日的处理顺序">
+        <li><b class="figure">T</b><div><strong>数据公开后决策</strong><span>只读当时可用的历史，确定下单数量</span></div></li>
+        <li><b class="figure">T+1</b><div><strong>模拟成交</strong><span>按所选价格模式加滑点，检查现金和成交限制</span></div></li>
+        <li><b class="figure">收盘</b><div><strong>记账</strong><span>逐笔账本、利息和净值，结果带数据与引擎版本</span></div></li>
+      </ol>
+    </section>
+
+    <div id="notice" class="visually-hidden" role="status" aria-live="polite"></div>
+
+    <div class="workbench">
+      <form id="research-form" class="worksheet">
+        <fieldset class="step">
+          <legend><span class="step-no">1</span>数据快照</legend>
+          <p id="storage-label" class="help">正在读取本机存储…</p>
+          <div class="row tools-row">
+            <button type="button" id="export-backup" class="small" disabled>备份本机数据</button>
+            <label class="btn small file-button">恢复备份<input id="backup-file" type="file" accept=".gz,application/gzip"></label>
+          </div>
+          <p id="package-status" class="help" role="status" aria-live="polite"></p>
+          <div id="missing-snapshots" class="chips" hidden></div>
+          <div id="snapshot-list" class="snapshot-list" role="group" aria-label="选择用于本次回测的数据快照"></div>
+          <div id="selection-note" class="callout"></div>
+          <div class="field">
+            <div class="field-label"><span>交易标的</span><span id="symbol-count" class="muted"></span></div>
+            <div id="symbol-list" class="chips symbol-chips" role="group" aria-label="交易标的"></div>
+            <p class="help">默认选中可交易标的，指数只作信号。单标的策略只交易排在首位的标的。</p>
+            <p id="strategy-scope-note" class="help"></p>
+          </div>
+        </fieldset>
+
+        <fieldset class="step">
+          <legend><span class="step-no">2</span>策略与参数</legend>
+          <label>策略<select id="strategy"><option value="">正在读取策略目录…</option></select></label>
+          <section class="strategy-parameter-panel" aria-labelledby="strategy-parameters-title">
+            <div class="field-label"><span id="strategy-parameters-title">策略参数</span><span id="strategy-count" class="muted"></span></div>
+            <div id="strategy-parameter-fields" aria-live="polite"></div>
+            <p id="strategy-parameter-status" class="help" role="status" aria-live="polite"></p>
+          </section>
+        </fieldset>
+
+        <fieldset class="step">
+          <legend><span class="step-no">3</span>研究方式、期间与资金</legend>
+          <label>研究方式<select id="kind">
+            <option value="single">单次回测</option>
+            <option value="rolling">滚动起点回测</option>
+            <option value="holdout">开发区间 / 留出验证</option>
+          </select></label>
+          <div class="grid-2">
+            <label>开始日期<input id="start" type="date" required></label>
+            <label>结束日期<input id="end" type="date" required></label>
+          </div>
+          <div id="rolling-fields" class="grid-3" hidden>
+            <label>起点间隔<select id="interval">
+              <option value="month">每月</option>
+              <option value="day">每日</option>
+              <option value="quarter">每季</option>
+              <option value="year">每年</option>
+            </select></label>
             <label>持有交易日<input id="horizon" type="number" min="2" value="120"></label>
-            <label>结束规则<select id="end-mode"><option value="fixed_length">相同持有期限</option><option value="common_end">持有至共同结束日</option></select></label>
+            <label>结束规则<select id="end-mode">
+              <option value="fixed_length">相同持有期限</option>
+              <option value="common_end">持有至共同结束日</option>
+            </select></label>
           </div>
-          <div id="holdout-fields" class="field-grid" hidden>
+          <div id="holdout-fields" class="grid-2" hidden>
             <label>留出起点<input id="test-start" type="date"></label>
             <label>隔离交易日<input id="gap" type="number" min="0" value="0"></label>
           </div>
-          <p class="help">本公开网页版本只运行内置策略；不会执行从网页输入或导入的任意 Python 代码。费用、杠杆和交易规则仍是研究假设。</p>
-        </details>
-        <div class="run-row"><button id="run" type="submit" class="primary" disabled>运行回测</button><span id="engine-status" class="muted">首次运行需加载固定版本的浏览器 Python 引擎与数值库。</span></div>
+          <div class="grid-2">
+            <label>初始资金<input id="cash" type="number" min="1" step="any" value="100000" required></label>
+            <label>每月自动入金（可选）<input id="monthly-deposit" type="number" min="0" step="0.01" placeholder="留空表示不定期入金"></label>
+          </div>
+          <p class="help">每月入金在每个自然月的首个交易日入账，首月也计入；只增加现金，不会自动买入。</p>
+          <p id="funding-status" class="help" role="status" aria-live="polite"></p>
+        </fieldset>
+
+        <fieldset class="step">
+          <legend><span class="step-no">4</span>交易假设</legend>
+          <label>成交价格模式<select id="mode">
+            <option value="strict_vwap">严格 VWAP，缺口阻止运行</option>
+            <option value="estimated_vwap">估算 VWAP，显式标记</option>
+            <option value="close_research">收盘价研究，不进入正常排名</option>
+            <option value="reference_research">参考历史价格，非实际成交</option>
+          </select></label>
+          <div class="grid-2">
+            <label>最大杠杆<input id="leverage" type="number" min="1" max="10" step="0.1" value="1"></label>
+            <label>基准<select id="benchmark"><option value="">不设置</option></select></label>
+          </div>
+          <details class="advanced">
+            <summary>费用与 JSON 参数</summary>
+            <div class="grid-2">
+              <label>佣金（基点）<input id="commission" type="number" min="0" step="any" value="3"></label>
+              <label>最低佣金<input id="minimum-commission" type="number" min="0" step="any" value="0"></label>
+              <label>滑点（基点）<input id="slippage" type="number" min="0" step="any" value="5"></label>
+              <label>年融资利率<input id="interest" type="number" min="0" step="0.01" value="0.06"></label>
+            </div>
+            <label>策略参数（JSON）<textarea id="params" rows="4" spellcheck="false">{"weight":0.95}</textarea>
+              <span class="help">适用于专业参数。月度动态等权还支持 month_end_dates（指定检查日期；留空时用下月首个交易日代理月末）。</span></label>
+            <label>额外入金 / 提款（JSON）<textarea id="flows" rows="3" spellcheck="false">{}</textarea>
+              <span class="help">用于特殊日期金额；每月入金请用上面的输入框，避免重复填写。</span></label>
+            <p class="help">网页版只运行内置策略，不执行网页输入或导入的任意 Python。费用、杠杆和交易规则仍是研究假设。</p>
+          </details>
+        </fieldset>
+
+        <div class="run-bar">
+          <div>
+            <p id="run-hint" class="run-hint" role="status" aria-live="polite">正在准备…</p>
+            <p id="engine-status" class="help">首次运行需下载固定版本的浏览器 Python 引擎与数值库。</p>
+          </div>
+          <button id="run" type="submit" class="primary" disabled>运行回测</button>
+        </div>
       </form>
-    </section>
 
-    <section class="panel results-panel" aria-labelledby="results-title">
-      <div class="section-heading"><div><p class="eyebrow">03 · 可复现输出</p><h2 id="results-title">研究结果</h2></div><span id="result-count" class="muted">尚无本机运行</span></div>
-      <div id="progress-area" hidden><div class="progress-label"><span id="progress-text">计算中</span><span id="progress-eta">估算剩余时间：计算中</span></div><progress id="progress" max="100" value="0"></progress></div>
-      <div id="result-detail" class="result-detail"><div class="empty"><span>∿</span><p>选择一份数据快照，检查日期和价格模式后开始研究。</p></div></div>
-      <div id="saved-runs" class="saved-runs"></div>
-    </section>
-
-    <footer><p>该静态网站不提供云端账户或云端存储。清除浏览器数据会删除本机保存内容；请定期使用“备份本机数据”。</p><p>固定版本的 Pyodide 与数值依赖从 jsDelivr 加载；该 CDN 可看到常规网络请求信息，但不会收到页面内行情数据和回测结果。</p></footer>
+      <section class="report-column" aria-labelledby="results-title">
+        <div class="report">
+          <div class="report-section">
+            <div class="section-head"><h2 id="results-title">研究结果</h2><span id="result-count" class="muted">尚无本机运行</span></div>
+            <div id="progress-area" class="progress" hidden>
+              <div class="progress-label"><span id="progress-text">计算中</span><span id="progress-eta" class="muted">估算剩余时间：计算中</span></div>
+              <div class="progress-track" role="progressbar" aria-label="回测计算进度" aria-valuemin="0" aria-valuemax="100"><span class="progress-fill" id="progress-fill"></span></div>
+            </div>
+            <div id="result-detail" class="result-detail">
+              <div class="empty">
+                <h3>还没有结果</h3>
+                <p>导入快照或试用合成演示，勾选数据和标的，再运行回测。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="report saved-report">
+          <div class="report-section">
+            <div class="section-head">
+              <h3>已保存的研究</h3>
+              <button type="button" id="compare-runs" class="small" disabled>比较所选</button>
+            </div>
+            <div id="saved-runs" class="saved-runs"></div>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
+
+  <footer>
+    <p>该静态网站没有云端账户或云端存储。清除浏览器数据会删除本机保存的内容；请定期使用“备份本机数据”。</p>
+    <p>固定版本的 Pyodide 与数值依赖从 jsDelivr 加载；该 CDN 可看到常规网络请求信息，但不会收到页面内的行情和回测结果。</p>
+  </footer>
+  <div id="toasts" class="toast-host"></div>
 </body>
 </html>

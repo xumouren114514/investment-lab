@@ -4,6 +4,10 @@
 
 Pages 版由白名单构建发布静态文件，从 jsDelivr 下载固定版本 Pyodide 及运行包，在 Web Worker 内计算，以 IndexedDB/localStorage 保存访客自己的快照、研究和配置。它没有本机后端、云账户或同步，也不执行访客上传的任意 Python。首次运行需联网加载资源，完整离线和跨设备等价验收仍待完成，见 [HOSTING.md](HOSTING.md)。
 
+网页前端是原生脚本，没有构建步骤。两版共用 `src/investment_lab/web/static/` 下的模块：`theme.css`（配色、字体和控件，含深浅主题与涨跌色偏好；`theme-boot.js` 在首屏前应用偏好）、`ui-utils.js`（格式化、CSV、偏好与运行标记）、`strategy-forms.js` 与 `strategy-editor.js`（参数表单和按策略保存的草稿原文）、`snapshot-selection.js`（快照选择规则，含缺失阻断）、`result-views.js`（指标、明细表、曲线定义与比较）、`charts.js`（SVG 曲线）。各模块在 Node 中可直接加载测试，在浏览器中注册为全局对象。本机版以 `app.js` 提供接口调用、提示、地址路由和任务进度，页面逻辑分在 `view-research.js`、`view-runs.js`、`view-manage.js`；本机内容安全策略只允许同源脚本和样式，页面不使用内联脚本或样式属性。Pages 构建按白名单复制共享模块，`pages/app.js` 只保留浏览器存储、Worker 与本版特有的流程。
+
+本机网页通过 `/api/runs/{id}/progress` 轮询任务状态，不读取结果，因此不计入留出查看次数；`/api/runs/{id}/table` 与 `/api/runs/{id}/export` 同样不计数，只有打开完成的留出详情才计数。代码指纹（`engine_hash`）覆盖 `src` 下的 Python、JSON 等源文件，但不含只由浏览器加载的 `web/static`，纯页面更新不影响已有运行的复现。
+
 SQLite 是任务、数据集当前指针、留出使用记录和审计的唯一可变索引。schema=1，打开不兼容 schema 时拒绝写入。每次写操作使用应用锁和短事务；SQLite 连接显式关闭。
 
 行情保存在 `market/<sha256>.json.gz`，按证券/年度生成不可变分区。`raw` 保存原始响应及代码/股票池旧版本。`manifests` 保存数据集清单；数据库中的清单使用同一内容哈希。新快照共享未变分区，旧清单及分区不清理，因此仍可重现旧输入。未采用另一套可变行情数据库。

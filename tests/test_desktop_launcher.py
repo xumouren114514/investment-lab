@@ -130,3 +130,41 @@ def test_application_window_uses_separate_profile_and_literal_arguments(tmp_path
     assert '--app=http://127.0.0.1:8765/' in command
     assert f'--user-data-dir={tmp_path / "Profile With Spaces/InvestmentLab/browser-profile"}' in command
     assert not any('remote-debugging' in item or 'disable-web-security' in item for item in command)
+
+
+@pytest.mark.skipif(desktop.os.name != 'nt', reason='Windows job objects only')
+@pytest.mark.parametrize('permitted', [True, False])
+def test_service_leaves_the_launcher_job_when_windows_permits(tmp_path, permitted):
+    python = tmp_path / '.venv/Scripts/python.exe'
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b'')
+    flags = []
+
+    def popen(command, **options):
+        flags.append(options['creationflags'])
+        if not permitted and options['creationflags'] & desktop.CREATE_BREAKAWAY_FROM_JOB:
+            raise OSError(None, 'Access is denied', None, desktop.ERROR_ACCESS_DENIED)
+        return SimpleNamespace(pid=321)
+
+    process = desktop.spawn_server(tmp_path / 'data', 8799, tmp_path / 'lab.log', project=tmp_path, popen=popen)
+    assert process.breakaway_from_job is permitted
+    assert flags[0] & desktop.CREATE_BREAKAWAY_FROM_JOB
+    assert len(flags) == (1 if permitted else 2)
+    assert not flags[-1] & desktop.CREATE_BREAKAWAY_FROM_JOB or permitted
+    assert ('breakaway from job not permitted' in (tmp_path / 'lab.log').read_text(encoding='utf-8')) is not permitted
+
+
+@pytest.mark.skipif(desktop.os.name != 'nt', reason='Windows job objects only')
+def test_other_start_errors_are_not_retried(tmp_path):
+    python = tmp_path / '.venv/Scripts/python.exe'
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b'')
+    calls = []
+
+    def popen(command, **options):
+        calls.append(options)
+        raise OSError(None, 'The system cannot find the file specified', None, 2)
+
+    with pytest.raises(OSError):
+        desktop.spawn_server(tmp_path / 'data', 8799, tmp_path / 'lab.log', project=tmp_path, popen=popen)
+    assert len(calls) == 1

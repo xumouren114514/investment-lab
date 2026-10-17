@@ -1,22 +1,422 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>投资研究室 · 本机回测</title><link rel="stylesheet" href="/static/style.css?v=20261005-1"><script src="/static/ui-utils.js?v=20260924-1"></script><script src="/static/config-presets.js?v=20261005-1" defer></script><script src="/static/portable-data.js?v=20260924-1" defer></script><script src="/static/strategy-forms.js?v=20261005-1"></script><script src="/static/app.js?v=20261005-1" defer></script></head>
-<body><aside class="sidebar"><div class="brand"><span class="brand-icon">研</span><div>投资研究室<small>INVESTMENT LAB</small></div></div><nav aria-label="主导航"><button data-view="research" class="active">策略研究</button><button data-view="runs">任务与结果</button><button data-view="data">数据覆盖</button><button data-view="universe">研究股票池</button><button data-view="strategies">Python 策略</button><button data-view="backups">版本与备份</button></nav><div class="side-footer"><span class="local-tag">仅在本机运行</span><p id="version">研发版</p><button class="text-button" data-doc="OPERATIONS.md">使用与恢复说明 ↗</button></div></aside>
-<main><header class="topbar"><div><span class="eyebrow">个人策略研究</span><h1 id="page-title">策略研究</h1></div><div id="system-state" class="system-state">正在读取本机状态</div></header><div id="notice" role="status" hidden></div>
-<section id="view-research" class="view"><div class="page-intro"><h2>让每一笔收益都可追溯。</h2><p>固定数据快照，按时间顺序决策。先检查数据，再运行策略。</p></div>
-<div class="workspace"><form id="run-form" class="panel settings"><div class="panel-heading"><h3>配置一次研究</h3><span class="step">01 — 03</span></div><fieldset id="config-tools" class="config-tools" disabled>
-<legend>我的配置</legend>
-<label>配置名称<input id="preset-name" maxlength="80" placeholder="例如：港股每月定投" autocomplete="off"></label>
-<button type="button" id="save-preset">保存当前配置</button>
-<label>已保存的配置<select id="preset-list"><option value="">正在读取…</option></select></label>
-<div class="config-actions"><button type="button" id="load-preset" disabled>载入配置</button><button type="button" id="export-config">导出 JSON</button><button type="button" id="import-config">导入 JSON</button></div>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>投资研究室</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/theme.css?v=20261007-1">
+  <link rel="stylesheet" href="/static/style.css?v=20261007-1">
+  <script src="/static/ui-utils.js?v=20261007-1"></script>
+  <script src="/static/theme-boot.js?v=20261007-1"></script>
+  <script src="/static/strategy-forms.js?v=20261007-1" defer></script>
+  <script src="/static/strategy-editor.js?v=20261007-1" defer></script>
+  <script src="/static/snapshot-selection.js?v=20261007-1" defer></script>
+  <script src="/static/config-presets.js?v=20261007-1" defer></script>
+  <script src="/static/portable-data.js?v=20261007-1" defer></script>
+  <script src="/static/charts.js?v=20261007-1" defer></script>
+  <script src="/static/result-views.js?v=20261007-1" defer></script>
+  <script src="/static/app.js?v=20261007-1" defer></script>
+  <script src="/static/view-research.js?v=20261007-1" defer></script>
+  <script src="/static/view-runs.js?v=20261007-1" defer></script>
+  <script src="/static/view-manage.js?v=20261007-1" defer></script>
+</head>
+<body>
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="#/research" aria-label="投资研究室：策略研究">
+      <span class="brand-mark" aria-hidden="true">研</span>
+      <span class="brand-name">投资研究室<small>本机版</small></span>
+    </a>
+    <nav class="nav" aria-label="主导航">
+      <a href="#/research" data-route="research">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg>
+        <span>策略研究</span>
+      </a>
+      <a href="#/runs" data-route="runs">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+        <span>研究记录</span>
+        <span id="nav-job" class="nav-job" hidden>计算中</span>
+      </a>
+      <a href="#/compare" data-route="compare">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 3 5-7 4 4"/><path d="M3 21h18"/></svg>
+        <span>结果比较</span>
+      </a>
+      <a href="#/data" data-route="data">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="7.5" ry="2.5"/><path d="M4.5 5.5v13c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5v-13M4.5 12c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5"/></svg>
+        <span>数据覆盖</span>
+      </a>
+      <a href="#/universe" data-route="universe">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="7" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/><rect x="13.5" y="13.5" width="7" height="7" rx="1"/></svg>
+        <span>标的池</span>
+      </a>
+      <a href="#/strategies" data-route="strategies">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 4l-3 16"/></svg>
+        <span>Python 策略</span>
+      </a>
+      <a href="#/backups" data-route="backups">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></svg>
+        <span>备份与恢复</span>
+      </a>
+    </nav>
+    <div class="side-foot">
+      <p id="version">正在连接本机服务</p>
+      <p>只在本机运行，不对外开放</p>
+      <button type="button" class="link" data-doc="OPERATIONS.md">使用与恢复说明</button>
+    </div>
+  </aside>
 
-<p id="draft-status" class="help" role="status">正在读取草稿…</p>
-<p class="help">配置与草稿保存在当前浏览器。刷新、关闭后重新打开或更新页面代码均可恢复；清理浏览器数据前请导出备份。桌面应用与其他浏览器可用 JSON 互相导入。保存参数，不包含行情或 Python 策略源文件。</p>
-</fieldset><fieldset id="dataset" class="dataset-picker" aria-describedby="dataset-help"><legend>数据快照 <span class="muted">可多选</span></legend><label class="snapshot-search">搜索数据快照<input id="dataset-search" type="search" placeholder="名称、代码或市场" autocomplete="off"></label><div class="dataset-toolbar"><span id="dataset-count" aria-live="polite">已选 0 个快照</span><button type="button" id="dataset-clear">清空选择</button></div><div id="dataset-selected" class="dataset-selected"></div><div id="dataset-options" class="dataset-options" role="group" aria-label="可选数据快照"></div><p id="dataset-empty" class="help" hidden>没有匹配的数据快照，试试其他名称或代码。</p><span id="dataset-match-count" class="help"></span><p class="help" id="dataset-help">直接勾选多份快照，用于同一次回测；需为同一市场和币种，每个标的只选一份来源。</p><p class="help" id="dataset-range"></p></fieldset><div id="dataset-note" class="callout"></div><label>交易标的<select id="symbols" multiple size="3" required></select><span class="help">默认选中新加入的可交易标的；按 Ctrl 调整选择，指数仅用于信号。</span><span class="help" id="strategy-scope-note"></span></label><div class="fields"><label>开始日期<input id="start" type="date" required></label><label>结束日期<input id="end" type="date" required></label></div><label>策略<select id="strategy"><option value="">正在读取策略目录…</option></select></label><section class="strategy-parameter-panel" aria-labelledby="strategy-parameters-title"><div class="panel-heading"><h3 id="strategy-parameters-title">策略参数</h3><span id="strategy-count" class="muted"></span></div><div id="strategy-parameter-fields" aria-live="polite"></div><p id="strategy-parameter-status" class="help" role="status" aria-live="polite"></p></section><label>研究方式<select id="kind"><option value="single">单次回测</option><option value="rolling">滚动起点回测</option><option value="holdout">开发区间 / 留出验证</option></select></label><div class="fields"><label>每月自动入金（可选）<input id="monthly-deposit" type="number" min="0" step="0.01" placeholder="留空表示不定期入金"><span class="help">每个自然月的首个交易日入账，首月也会计入；只增加现金，不会自动买入。</span></label><p id="funding-status" class="help" role="status" aria-live="polite"></p><label>初始资金<input id="cash" type="number" value="100000" min="1" required></label><label>最大杠杆<input id="leverage" type="number" value="1" min="1" max="10" step="0.1"></label></div><label>成交价格模式<select id="mode"><option value="strict_vwap">严格 VWAP · 缺口阻止运行</option><option value="estimated_vwap">已有估算 VWAP · 显式标记</option><option value="close_research">收盘价研究 · 排除正常排名</option><option value="reference_research">参考历史价格研究 · 非实际成交价</option></select><span class="help" id="price-mode-note"></span></label><div id="rolling-options" hidden><div class="fields"><label>起点间隔<select id="interval"><option value="month">每月</option><option value="day">每日</option><option value="quarter">每季</option><option value="year">每年</option></select></label><label>持有交易日<input id="horizon" type="number" value="120" min="2"></label></div><label>结束规则<select id="end-mode"><option value="fixed_length">各起点持有相同期限</option><option value="common_end">持有至共同结束日</option></select></label></div><div id="holdout-options" hidden><div class="fields"><label>留出起点<input id="test-start" type="date" value="2025-01-02"></label><label>隔离交易日<input id="gap" type="number" min="0" value="0"></label></div></div><details><summary>高级设置：费用、JSON 参数与资金流</summary><div class="fields"><label>佣金（基点）<input id="commission" type="number" value="3" min="0"></label><label>滑点（基点）<input id="slippage" type="number" value="5" min="0"></label><label>年融资利率<input id="interest" type="number" value="0.06" step="0.01" min="0"></label><label>预热交易日<input id="warmup" type="number" value="0" min="0"></label></div><label>基准<select id="benchmark"><option value="">不设置</option></select></label><label>策略参数（JSON）<textarea id="params" rows="3">{"weight": 0.95}</textarea></label><label>额外日期入金 / 提款（JSON）<textarea id="flows" rows="3" aria-describedby="flows-help">{}</textarea></label><p class="help" id="flows-help">这里用于特殊日期金额等高级安排。每月入金请使用“资金计划”输入框，避免重复填写；入金不会自动下买单。</p><button type="button" id="monthly-example">填入每月 3000 示例</button><label>其他引擎配置（JSON）<textarea id="advanced" rows="3">{}</textarea></label><p class="help">费率、交易单位和杠杆均为研究假设。真实历史规则需按日期核实。</p></details><button class="primary" type="submit" id="run-button">运行并保存快照 <span>→</span></button></form>
-<div class="research-main"><div class="panel flow-panel"><div class="panel-heading"><h3>本次研究的时间顺序</h3><span class="muted">默认日线模型</span></div><div class="flow"><div><b>T</b><strong>数据可用后</strong><span>读取历史 · 生成信号<br>确定下单数量</span></div><span class="flow-arrow">→</span><div><b>T + 1</b><strong>模拟成交</strong><span><span id="execution-price-label">VWAP + 滑点</span><br>检查现金与成交限制</span></div><span class="flow-arrow">→</span><div><b>收盘</b><strong>记录净值</strong><span>逐笔账本 · 利息<br>保存结果与数据版本</span></div></div></div><div class="panel" id="latest-preview"><div class="panel-heading"><h3>研究结果</h3><span class="badge">等待运行</span></div><div class="empty"><span class="empty-mark">∿</span><h3>从一组可核对的数据开始</h3><p>运行后，这里会展示净值、回撤与交易记录。<br>合成演示数据只用于验证流程。</p></div></div><div class="research-foot"><span>可复现的数据快照</span><span>独立 Python 工作进程</span><span>无跨市场资金混合</span></div></div></div></section>
-<section id="view-runs" class="view" hidden><div class="section-bar"><p>每次运行都有独立代码、参数和数据快照。</p><button id="refresh-runs">刷新任务</button></div><div class="panel table-wrap" id="runs-list" tabindex="-1" aria-label="运行列表"><table><thead><tr><th>运行</th><th>策略 / 类型</th><th>数据</th><th>状态</th><th>操作</th></tr></thead><tbody id="runs-body"></tbody></table></div><div id="result-detail" role="region" aria-label="运行详情" tabindex="-1"></div></section>
-<section id="view-data" class="view" hidden><div class="section-bar"><p>明确区分实际下载、供应商文档声称和未验证覆盖。</p><div><button id="update-data">检查并补数</button><button data-doc="DATA_SOURCES.md">数据源评估 ↗</button></div></div><div class="panel"><div class="panel-heading"><h3>无需账号的公开资源</h3><button data-doc="OPEN_RESOURCES.md">查看资源评估与操作说明 ↗</button></div><p class="help">先下载 6 个代表样本，或补齐当前股票池。候选均价与严格 VWAP 分开统计；下载完成不代表回测条件已满足。</p><div class="toolbar"><button id="open-samples">下载 / 续传代表样本</button><button id="open-universe">下载 / 续传完整股票池</button><button id="open-refresh">刷新进度</button></div><p id="open-progress" aria-live="polite"></p><details><summary>开源工具与公共数据源</summary><div id="open-catalog" class="table-wrap"></div></details></div><div class="panel"><h3>导入快照数据包（本机）</h3><p class="help">选择此前导出的 `.json.gz` 文件。程序会校验清单和行情后在本机重建快照；原始供应商响应不包含在包内。导入不会上传文件，目前 GitHub Pages 静态版尚不支持此导入流程；分享前请先确认数据许可。</p><div class="fields"><label>快照数据包<input id="snapshot-import-file" type="file" accept=".gz,application/gzip"></label><button id="snapshot-import" disabled>校验并导入到本机</button></div><p id="snapshot-import-status" class="help" role="status" aria-live="polite"></p></div><div class="toolbar"><label>筛选数据集<input id="data-filter" placeholder="输入代码、名称或市场"></label></div><p class="help">数据包在本机生成，仅供手动传递；包含行情和来源信息，不含原始供应商响应，不会自动上传。分享前请确认数据许可。</p><div id="dataset-cards" class="cards"></div><div id="coverage-detail"></div><div class="panel"><h3>本机导入与账号配置</h3><p>目前无需购买订阅即可验证平台。真实行情通过正式 API 或标准化 JSON 导入；密钥仅通过本机环境变量提供。</p><button data-doc="OPERATIONS.md">查看导入、每日更新和计划任务入口</button></div></section>
-<section id="view-universe" class="view" hidden><div class="section-bar"><p>90 只股票 · 13 组指数与 ETF；固定事后选择股票池，存在生存者偏差。</p><button id="new-instrument">添加标的</button></div><div class="toolbar"><label>筛选市场<select id="universe-market"><option value="">全部</option><option>HK</option><option>US</option><option>CN</option></select></label><label>搜索<input id="universe-search" placeholder="名称或代码"></label></div><div class="panel table-wrap"><table><thead><tr><th>代码</th><th>名称</th><th>市场 / 币种</th><th>类别</th><th>验证</th><th>操作</th></tr></thead><tbody id="universe-body"></tbody></table></div><details class="panel" id="instrument-editor"><summary>标的配置与生效日期</summary><textarea id="instrument-json" rows="12" aria-label="标的 JSON"></textarea><button id="save-instrument" class="primary">保存标的版本</button></details></section>
-<section id="view-strategies" class="view" hidden><div class="section-bar"><p>使用完整 Python 文件和 Pandas / NumPy。保存会保留旧代码快照。</p><button data-doc="STRATEGIES.md">策略接口与示例 ↗</button></div><div class="panel"><div class="fields"><label>已有文件<select id="custom-files"></select></label><label>文件名<input id="strategy-name" value="my_strategy.py"></label></div><label>策略代码<textarea class="code-editor" id="strategy-code" rows="20" spellcheck="false"></textarea></label><div class="section-bar"><span class="help">仅运行你信任的本机代码。进程隔离、取消及资源限制已启用。</span><button id="save-strategy" class="primary">保存 Python 策略</button></div></div></section>
-<section id="view-backups" class="view" hidden><div class="section-bar"><p>先校验恢复点，再恢复到独立目录。</p><button id="create-backup" class="primary">建立一致性备份</button></div><div class="panel"><h3>当前运行位置</h3><pre id="paths"></pre><p class="callout">当前仅有本地同盘恢复能力。API 密钥不在普通备份中，恢复后需重新输入。</p><button data-doc="OPERATIONS.md">查看备份与恢复说明 ↗</button></div><div class="panel table-wrap"><table><thead><tr><th>恢复点</th><th>版本</th><th>状态</th><th>操作</th></tr></thead><tbody id="backups-body"></tbody></table></div><div class="panel"><h3>保留策略预览</h3><p>最近 7 个日恢复点、4 个周恢复点、3 个月恢复点，以及固定保护版本。当前没有启用自动删除。</p><pre id="retention"></pre></div><div class="panel"><h3>恢复到新目录</h3><label>恢复点<input id="restore-id" readonly></label><label>不存在的目标目录<input id="restore-destination" placeholder="例如：E:\InvestmentLab\restored-日期"></label><button id="restore-backup">校验并恢复</button></div></section>
-</main><dialog id="doc-dialog"><div class="panel-heading"><h3 id="doc-title"></h3><button id="close-doc" aria-label="关闭文档">关闭</button></div><pre id="doc-text"></pre></dialog><dialog id="config-dialog" aria-labelledby="config-dialog-title"><div class="section-bar"><h2 id="config-dialog-title">配置 JSON</h2><button type="button" id="close-config-dialog">关闭</button></div><p id="config-dialog-status" class="help" role="status"></p><input id="config-file" type="file" accept=".json,application/json" hidden><label>完整配置 JSON<textarea id="config-json" rows="15" spellcheck="false"></textarea></label><div class="config-actions"><button type="button" id="choose-config-file">选择 JSON 文件</button><button type="button" id="apply-config-json" class="primary">载入 JSON</button><button type="button" id="download-config-json">下载文件</button></div></dialog></body></html>
+  <div class="main">
+    <header class="topbar">
+      <h1 id="page-title">策略研究</h1>
+      <div class="topbar-tools">
+        <a id="job-indicator" class="job-pill" href="#/runs" hidden></a>
+        <span id="system-state" class="system-state">正在读取本机状态</span>
+        <button type="button" id="prefs-button" class="quiet" aria-expanded="false" aria-controls="prefs-panel">显示设置</button>
+      </div>
+      <div id="prefs-panel" class="prefs-panel" hidden>
+        <div>
+          <span class="prefs-label" id="theme-label">外观</span>
+          <div class="segmented" role="group" aria-labelledby="theme-label">
+            <button type="button" data-theme-choice="auto">跟随系统</button>
+            <button type="button" data-theme-choice="light">浅色</button>
+            <button type="button" data-theme-choice="dark">深色</button>
+          </div>
+        </div>
+        <div>
+          <span class="prefs-label" id="gain-label">涨跌颜色</span>
+          <div class="segmented" role="group" aria-labelledby="gain-label">
+            <button type="button" data-gain-choice="red">红涨绿跌</button>
+            <button type="button" data-gain-choice="green">绿涨红跌</button>
+          </div>
+        </div>
+        <p class="help">设置保存在此浏览器窗口，不影响数据或计算。</p>
+      </div>
+    </header>
+
+    <div id="notice" class="visually-hidden" role="status" aria-live="polite"></div>
+
+    <main id="content">
+      <section id="view-research" class="view" aria-labelledby="page-title">
+        <div class="research-grid">
+          <form id="run-form" class="worksheet">
+            <div class="worksheet-head">
+              <div>
+                <h2>配置一次研究</h2>
+                <p>按顺序完成四步。数据快照固定后，策略只能看到每个决策日已经公开的历史。</p>
+              </div>
+              <details class="config-menu">
+                <summary>我的配置</summary>
+                <fieldset id="config-tools" class="config-tools" disabled>
+                  <legend class="visually-hidden">保存与载入配置</legend>
+                  <label>配置名称<input id="preset-name" maxlength="80" placeholder="例如：港股每月定投" autocomplete="off"></label>
+                  <button type="button" id="save-preset">保存当前配置</button>
+                  <label>已保存的配置<select id="preset-list"><option value="">正在读取…</option></select></label>
+                  <div class="row">
+                    <button type="button" id="load-preset" disabled>载入</button>
+                    <button type="button" id="export-config">导出 JSON</button>
+                    <button type="button" id="import-config">导入 JSON</button>
+                  </div>
+                  <p class="help">配置与草稿保存在当前浏览器，刷新或更新页面后可恢复；只保存参数，不含行情或 Python 源文件。清理浏览器数据前请导出。</p>
+                </fieldset>
+              </details>
+            </div>
+            <p id="draft-status" class="draft-status" role="status">正在读取草稿…</p>
+
+            <fieldset class="step" aria-describedby="dataset-help">
+              <legend><span class="step-no">1</span>数据与标的</legend>
+              <div id="dataset" class="dataset-picker">
+                <label class="dataset-search">搜索数据快照<input id="dataset-search" type="search" placeholder="名称、代码或市场" autocomplete="off"></label>
+                <div class="dataset-toolbar">
+                  <span id="dataset-count" aria-live="polite">已选 0 个快照</span>
+                  <button type="button" id="dataset-clear" class="small quiet">清空选择</button>
+                </div>
+                <div id="dataset-selected" class="chips"></div>
+                <div id="dataset-options" class="dataset-options" role="group" aria-label="可选数据快照"></div>
+                <p id="dataset-empty" class="help" hidden>没有匹配的数据快照，试试其他名称或代码。</p>
+                <span id="dataset-match-count" class="help"></span>
+                <p class="help" id="dataset-help">可勾选多份快照用于同一次回测：须为同一市场和币种，每个标的只选一份来源。</p>
+                <p class="help" id="dataset-range"></p>
+              </div>
+              <div id="dataset-note" class="callout"></div>
+              <div class="field">
+                <div class="field-label"><span>交易标的</span><span id="symbol-count" class="muted"></span></div>
+                <div id="symbols" class="chips symbol-chips" role="group" aria-label="交易标的"></div>
+                <p class="help">默认选中可交易标的，指数只作信号。单标的策略只交易排在首位的标的。</p>
+                <p class="help" id="strategy-scope-note"></p>
+              </div>
+            </fieldset>
+
+            <fieldset class="step">
+              <legend><span class="step-no">2</span>策略与参数</legend>
+              <label>策略<select id="strategy"><option value="">正在读取策略目录…</option></select></label>
+              <section class="strategy-parameter-panel" aria-labelledby="strategy-parameters-title">
+                <div class="field-label"><span id="strategy-parameters-title">策略参数</span><span id="strategy-count" class="muted"></span></div>
+                <div id="strategy-parameter-fields" aria-live="polite"></div>
+                <p id="strategy-parameter-status" class="help" role="status" aria-live="polite"></p>
+              </section>
+            </fieldset>
+
+            <fieldset class="step">
+              <legend><span class="step-no">3</span>研究方式、期间与资金</legend>
+              <label>研究方式<select id="kind">
+                <option value="single">单次回测</option>
+                <option value="rolling">滚动起点回测</option>
+                <option value="holdout">开发区间 / 留出验证</option>
+              </select></label>
+              <div class="grid-2">
+                <label>开始日期<input id="start" type="date" required></label>
+                <label>结束日期<input id="end" type="date" required></label>
+              </div>
+              <div id="rolling-options" class="grid-3" hidden>
+                <label>起点间隔<select id="interval">
+                  <option value="month">每月</option>
+                  <option value="day">每日</option>
+                  <option value="quarter">每季</option>
+                  <option value="year">每年</option>
+                </select></label>
+                <label>持有交易日<input id="horizon" type="number" value="120" min="2"></label>
+                <label>结束规则<select id="end-mode">
+                  <option value="fixed_length">各起点持有相同期限</option>
+                  <option value="common_end">持有至共同结束日</option>
+                </select></label>
+              </div>
+              <div id="holdout-options" class="grid-2" hidden>
+                <label>留出起点<input id="test-start" type="date" value="2025-01-02"></label>
+                <label>隔离交易日<input id="gap" type="number" min="0" value="0"></label>
+              </div>
+              <div class="grid-2">
+                <label>初始资金<input id="cash" type="number" value="100000" min="1" required></label>
+                <label>每月自动入金（可选）<input id="monthly-deposit" type="number" min="0" step="0.01" placeholder="留空表示不定期入金"></label>
+              </div>
+              <p class="help">每月入金在每个自然月的首个交易日入账，首月也计入；只增加现金，不会自动买入。</p>
+              <p id="funding-status" class="help" role="status" aria-live="polite"></p>
+            </fieldset>
+
+            <fieldset class="step">
+              <legend><span class="step-no">4</span>交易假设</legend>
+              <label>成交价格模式<select id="mode">
+                <option value="strict_vwap">严格 VWAP，缺口阻止运行</option>
+                <option value="estimated_vwap">已有估算 VWAP，显式标记</option>
+                <option value="close_research">收盘价研究，不进入正常排名</option>
+                <option value="reference_research">参考历史价格研究，非实际成交价</option>
+              </select><span class="help" id="price-mode-note"></span></label>
+              <div class="grid-2">
+                <label>最大杠杆<input id="leverage" type="number" value="1" min="1" max="10" step="0.1"></label>
+                <label>基准<select id="benchmark"><option value="">不设置</option></select></label>
+              </div>
+              <details id="advanced-settings" class="advanced">
+                <summary>费用、预热与 JSON 参数</summary>
+                <div class="grid-2">
+                  <label>佣金（基点）<input id="commission" type="number" value="3" min="0"></label>
+                  <label>滑点（基点）<input id="slippage" type="number" value="5" min="0"></label>
+                  <label>年融资利率<input id="interest" type="number" value="0.06" step="0.01" min="0"></label>
+                  <label>预热交易日<input id="warmup" type="number" value="0" min="0"></label>
+                </div>
+                <label>策略参数（JSON）<textarea id="params" rows="4" spellcheck="false">{"weight": 0.95}</textarea></label>
+                <label>额外日期入金 / 提款（JSON）<textarea id="flows" rows="3" spellcheck="false" aria-describedby="flows-help">{}</textarea></label>
+                <p class="help" id="flows-help">用于特殊日期的金额。每月入金请用上面的输入框，避免重复；入金不会自动下买单。</p>
+                <button type="button" id="monthly-example" class="small">填入每月 3000 示例</button>
+                <label>其他引擎配置（JSON）<textarea id="advanced" rows="3" spellcheck="false">{}</textarea></label>
+                <p class="help">费率、交易单位和杠杆都是研究假设，真实历史规则需按日期核实。</p>
+              </details>
+            </fieldset>
+
+            <div class="run-bar">
+              <p id="run-hint" class="run-hint" role="status" aria-live="polite">正在准备…</p>
+              <button class="primary" type="submit" id="run-button">运行并保存</button>
+            </div>
+          </form>
+
+          <aside class="research-aside">
+            <section class="paper timeline" aria-labelledby="timeline-title">
+              <h3 id="timeline-title">每个交易日的处理顺序</h3>
+              <ol class="timeline-steps">
+                <li><b class="figure">T</b><div><strong>数据公开后决策</strong><span>读取当时可用的历史，生成信号并确定下单数量</span></div></li>
+                <li><b class="figure">T+1</b><div><strong>模拟成交</strong><span><span id="execution-price-label">VWAP + 滑点</span>，检查现金与成交限制</span></div></li>
+                <li><b class="figure">收盘</b><div><strong>记账</strong><span>逐笔账本、融资利息与净值，连同数据版本一起保存</span></div></li>
+              </ol>
+            </section>
+            <section class="paper preview" id="latest-preview" aria-live="polite">
+              <div class="empty">
+                <h3>还没有完成的回测</h3>
+                <p>运行后，这里显示最近一次单次回测的净值与回撤。合成演示数据只用于验证流程。</p>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section id="view-runs" class="view" hidden>
+        <div class="toolbar-row">
+          <div class="filters">
+            <label>状态<select id="runs-status">
+              <option value="">全部</option>
+              <option value="active">排队或计算中</option>
+              <option value="completed">已完成</option>
+              <option value="failed">失败</option>
+              <option value="ended">已取消或中断</option>
+            </select></label>
+            <label>类型<select id="runs-kind">
+              <option value="">全部</option>
+              <option value="single">单次回测</option>
+              <option value="rolling">滚动起点</option>
+              <option value="holdout">留出验证</option>
+            </select></label>
+            <label class="grow">搜索<input id="runs-search" type="search" placeholder="策略、标的或运行编号" autocomplete="off"></label>
+          </div>
+          <div class="row">
+            <button type="button" id="compare-selected" class="primary" disabled>比较所选</button>
+            <button type="button" id="refresh-runs">刷新</button>
+          </div>
+        </div>
+        <p class="help">每次运行都冻结了代码、参数和数据快照。勾选 2–6 次已完成的单次回测可以叠加比较。</p>
+        <div class="table-wrap runs-wrap" id="runs-list" tabindex="-1" aria-label="运行列表">
+          <table class="runs-table">
+            <thead><tr>
+              <th class="check-col"><span class="visually-hidden">选择</span></th>
+              <th>研究</th><th>区间</th><th>数据</th><th class="num">收益</th><th class="num">最大回撤</th><th>状态</th><th>操作</th>
+            </tr></thead>
+            <tbody id="runs-body"></tbody>
+          </table>
+        </div>
+        <div class="table-foot"><span id="runs-count"></span><button type="button" id="runs-more" class="small" hidden>加载更多</button></div>
+      </section>
+
+      <section id="view-run" class="view" hidden>
+        <div id="result-detail" role="region" aria-label="运行详情" tabindex="-1"></div>
+      </section>
+
+      <section id="view-compare" class="view" hidden>
+        <div id="compare-detail"></div>
+      </section>
+
+      <section id="view-data" class="view" hidden>
+        <div class="toolbar-row">
+          <p class="muted">分开记录实际下载、供应商声称和未验证的覆盖。</p>
+          <div class="row">
+            <button type="button" id="update-data">检查并补数</button>
+            <button type="button" data-doc="DATA_SOURCES.md">数据源评估</button>
+          </div>
+        </div>
+        <div class="data-columns">
+          <section class="paper pad">
+            <div class="section-head"><h3>无需账号的公开资源</h3><button type="button" class="link" data-doc="OPEN_RESOURCES.md">资源评估与操作说明</button></div>
+            <p class="help">先下载 6 个代表样本，或补齐当前股票池。候选均价与严格 VWAP 分开统计；下载完成不代表满足回测条件。</p>
+            <div class="row">
+              <button type="button" id="open-samples">下载或续传代表样本</button>
+              <button type="button" id="open-universe">下载或续传完整股票池</button>
+              <button type="button" id="open-refresh" class="quiet">刷新进度</button>
+            </div>
+            <p id="open-progress" class="help" aria-live="polite"></p>
+            <details><summary>开源工具与公共数据源</summary><div id="open-catalog" class="table-wrap"></div></details>
+          </section>
+          <section class="paper pad">
+            <h3>导入快照数据包</h3>
+            <p class="help">选择此前导出的 .json.gz 文件。程序校验清单和行情后在本机重建快照；数据包不含原始供应商响应，导入不会上传文件。分享前请确认数据许可。</p>
+            <div class="row import-row">
+              <input id="snapshot-import-file" type="file" accept=".gz,application/gzip" aria-label="快照数据包">
+              <button type="button" id="snapshot-import" disabled>校验并导入</button>
+            </div>
+            <p id="snapshot-import-status" class="help" role="status" aria-live="polite"></p>
+          </section>
+        </div>
+        <div class="toolbar-row">
+          <label class="grow narrow">筛选数据集<input id="data-filter" type="search" placeholder="输入代码、名称或市场" autocomplete="off"></label>
+          <span id="data-count" class="muted"></span>
+        </div>
+        <div id="dataset-cards" class="dataset-cards"></div>
+        <div id="coverage-detail"></div>
+        <p class="help">数据包在本机生成，仅供手动传递；包含行情和来源信息，不含原始供应商响应。真实行情通过正式 API 或标准化 JSON 导入，密钥只放在本机环境变量。<button type="button" class="link" data-doc="OPERATIONS.md">导入、每日更新和计划任务说明</button></p>
+      </section>
+
+      <section id="view-universe" class="view" hidden>
+        <div class="toolbar-row">
+          <div class="filters">
+            <label>市场<select id="universe-market"><option value="">全部</option><option>HK</option><option>US</option><option>CN</option></select></label>
+            <label class="grow">搜索<input id="universe-search" type="search" placeholder="名称或代码" autocomplete="off"></label>
+          </div>
+          <button type="button" id="new-instrument">添加标的</button>
+        </div>
+        <p class="help" id="universe-note">固定的事后选择股票池存在生存者偏差；保存会生成新版本，旧回测保持可追溯。</p>
+        <div class="table-wrap">
+          <table><thead><tr><th>代码</th><th>名称</th><th>市场 / 币种</th><th>类别</th><th>映射</th><th>操作</th></tr></thead><tbody id="universe-body"></tbody></table>
+        </div>
+        <details class="paper pad editor-panel" id="instrument-editor">
+          <summary>标的配置与生效日期</summary>
+          <textarea id="instrument-json" rows="12" spellcheck="false" aria-label="标的 JSON"></textarea>
+          <div class="row"><button type="button" id="save-instrument" class="primary">保存标的版本</button></div>
+        </details>
+      </section>
+
+      <section id="view-strategies" class="view" hidden>
+        <div class="toolbar-row">
+          <p class="muted">完整 Python 文件，可使用 Pandas / NumPy。保存时保留旧代码快照。</p>
+          <button type="button" data-doc="STRATEGIES.md">策略接口与示例</button>
+        </div>
+        <section class="paper pad">
+          <div class="grid-2">
+            <label>已有文件<select id="custom-files"></select></label>
+            <label>文件名<input id="strategy-name" value="my_strategy.py"></label>
+          </div>
+          <label>策略代码<textarea class="code-editor" id="strategy-code" rows="22" spellcheck="false"></textarea></label>
+          <div class="row spread">
+            <span class="help">只运行你信任的本机代码。已启用进程隔离、取消和资源限制，但这不是安全沙箱。</span>
+            <button type="button" id="save-strategy" class="primary">保存 Python 策略</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="view-backups" class="view" hidden>
+        <div class="toolbar-row">
+          <p class="muted">先校验恢复点，再恢复到独立目录。</p>
+          <button type="button" id="create-backup" class="primary">建立一致性备份</button>
+        </div>
+        <div class="data-columns">
+          <section class="paper pad">
+            <h3>当前运行位置</h3>
+            <pre id="paths"></pre>
+            <p class="callout">目前只有同盘恢复能力。API 密钥不在普通备份中，恢复后需重新设置；浏览器里的配置和研究需要另行导出。</p>
+            <button type="button" class="link" data-doc="OPERATIONS.md">备份与恢复说明</button>
+          </section>
+          <section class="paper pad">
+            <h3>恢复到新目录</h3>
+            <label>恢复点<input id="restore-id" readonly placeholder="在下方列表中选择"></label>
+            <label>不存在的目标目录<input id="restore-destination" placeholder="例如：E:\InvestmentLab\restored-日期"></label>
+            <div class="row"><button type="button" id="restore-backup">校验并恢复</button></div>
+          </section>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>恢复点</th><th>版本</th><th>状态</th><th>操作</th></tr></thead><tbody id="backups-body"></tbody></table>
+        </div>
+        <section class="paper pad">
+          <h3>保留策略预览</h3>
+          <p class="help">保留最近 7 个日恢复点、4 个周恢复点、3 个月恢复点和固定保护版本。目前没有启用自动删除。</p>
+          <pre id="retention"></pre>
+        </section>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div id="toasts" class="toast-host"></div>
+
+<dialog id="doc-dialog" aria-labelledby="doc-title">
+  <div class="row spread dialog-head"><h3 id="doc-title"></h3><button type="button" id="close-doc">关闭</button></div>
+  <pre id="doc-text"></pre>
+</dialog>
+
+<dialog id="config-dialog" aria-labelledby="config-dialog-title">
+  <div class="row spread dialog-head"><h2 id="config-dialog-title">配置 JSON</h2><button type="button" id="close-config-dialog">关闭</button></div>
+  <p id="config-dialog-status" class="help" role="status"></p>
+  <input id="config-file" type="file" accept=".json,application/json" hidden>
+  <label>完整配置 JSON<textarea id="config-json" rows="15" spellcheck="false"></textarea></label>
+  <div class="row">
+    <button type="button" id="choose-config-file">选择 JSON 文件</button>
+    <button type="button" id="apply-config-json" class="primary">载入 JSON</button>
+    <button type="button" id="download-config-json">下载文件</button>
+  </div>
+</dialog>
+</body>
+</html>

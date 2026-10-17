@@ -70,7 +70,11 @@ def log_tail(path):
         return "日志尚未生成。"
 
 
-def spawn_server(data, port, log_path, project=PROJECT):
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+ERROR_ACCESS_DENIED = 5
+
+
+def spawn_server(data, port, log_path, project=PROJECT, popen=subprocess.Popen):
     python = Path(project) / ".venv/Scripts/python.exe"
     if not python.is_file():
         raise LaunchError(f"Python 环境不存在：{python}\n请在项目目录运行 scripts\\install.ps1。")
@@ -79,9 +83,25 @@ def spawn_server(data, port, log_path, project=PROJECT):
     flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0
     with Path(log_path).open("ab", buffering=0) as output:
         output.write(f"\n=== desktop start {now()} ===\n".encode())
-        return subprocess.Popen(command, cwd=project, env=environment, stdin=subprocess.DEVNULL,
-                                stdout=output, stderr=subprocess.STDOUT, close_fds=True,
-                                creationflags=flags, start_new_session=os.name != "nt")
+        def start(creationflags):
+            return popen(command, cwd=project, env=environment, stdin=subprocess.DEVNULL, stdout=output,
+                         stderr=subprocess.STDOUT, close_fds=True, creationflags=creationflags,
+                         start_new_session=os.name != "nt")
+
+        if os.name != "nt":
+            return start(flags)
+        # A launcher started inside a job object (for example by a tool's process tree) would
+        # otherwise take the service down when that job closes. Jobs may forbid breakaway.
+        try:
+            process = start(flags | CREATE_BREAKAWAY_FROM_JOB)
+            process.breakaway_from_job = True
+        except OSError as exc:
+            if getattr(exc, "winerror", None) != ERROR_ACCESS_DENIED:
+                raise
+            output.write(b"breakaway from job not permitted; service stays in the launcher job\n")
+            process = start(flags)
+            process.breakaway_from_job = False
+        return process
 
 
 def ensure_service(data, port=8765, timeout=60, progress=lambda _: None, project=PROJECT):
@@ -105,7 +125,8 @@ def ensure_service(data, port=8765, timeout=60, progress=lambda _: None, project
                 status = probe_service(data, port, project)
                 if status:
                     report = {"reused": False, "status": status, "url": f"http://127.0.0.1:{port}/",
-                              "launcher_child_pid": process.pid, "started": now(), "log": str(log_path)}
+                              "launcher_child_pid": process.pid, "started": now(), "log": str(log_path),
+                              "breakaway_from_job": getattr(process, "breakaway_from_job", None)}
                     atomic_write(data / "state/desktop-service.json", report)
                     return report
                 time.sleep(.25)

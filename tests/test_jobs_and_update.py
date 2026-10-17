@@ -84,3 +84,21 @@ def test_update_idempotent_failure_preserves_data(tmp_path, small, monkeypatch):
     payload["bars"] = []
     assert updater.update(store)["failed"] == 1
     assert store.datasets()[0]["id"] == third["items"][0]["snapshot"]
+
+
+def test_code_fingerprint_ignores_page_only_changes(tmp_path, monkeypatch):
+    import investment_lab.jobs as jobs
+    project = tmp_path / "project"
+    static = project / "src/investment_lab/web/static"
+    static.mkdir(parents=True)
+    engine = project / "src/investment_lab/engine.py"
+    engine.write_text("x = 1\n", encoding="utf-8")
+    (static / "app.js").write_text("console.log(1)\n", encoding="utf-8")
+    monkeypatch.setattr(jobs, "PROJECT", project)
+    monkeypatch.setattr(jobs, "PAGE_ASSETS", static)
+    before = jobs.code_fingerprint()
+    (static / "app.js").write_text("console.log(2)\n", encoding="utf-8")
+    (static / "theme.css").write_text("body{}\n", encoding="utf-8")
+    assert jobs.code_fingerprint() == before
+    engine.write_text("x = 2\n", encoding="utf-8")
+    assert jobs.code_fingerprint() != before

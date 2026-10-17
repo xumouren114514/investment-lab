@@ -19,8 +19,15 @@ from investment_lab.data.store import Store
 from investment_lab.engine.models import Config
 
 
+PAGE_ASSETS = PROJECT / "src/investment_lab/web/static"
+
+
 def code_fingerprint():
-    files = {str(p.relative_to(PROJECT)): digest(p.read_bytes()) for p in sorted((PROJECT / "src").rglob("*")) if p.is_file() and "__pycache__" not in p.parts and p.suffix in (".py", ".html", ".css", ".js", ".json")}
+    # Page assets are only served to the browser; worker processes never read them, so a
+    # page-only update must not make earlier runs non-reproducible in this directory.
+    files = {str(p.relative_to(PROJECT)): digest(p.read_bytes()) for p in sorted((PROJECT / "src").rglob("*"))
+             if p.is_file() and "__pycache__" not in p.parts and p.suffix in (".py", ".html", ".css", ".js", ".json")
+             and PAGE_ASSETS not in p.parents}
     return digest(files)
 
 

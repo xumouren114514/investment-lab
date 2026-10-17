@@ -50,9 +50,11 @@
     return validate(value);
   }
 
-  function capture(doc, snapshots, strategyParams = {}) {
+  // Symbols are passed in order when the page keeps them outside a <select multiple>.
+  function capture(doc, snapshots, strategyParams = {}, symbols = null) {
+    const chosen = symbols ?? [...doc.getElementById('symbols').selectedOptions].map(o => o.value);
     return validate({format, version: 1, name: doc.getElementById('preset-name').value,
-      snapshots, symbols: [...doc.getElementById('symbols').selectedOptions].map(o => o.value),
+      snapshots, symbols: [...chosen],
       fields: Object.fromEntries(fields.map(id => [id, doc.getElementById(id).value])), strategyParams});
   }
 

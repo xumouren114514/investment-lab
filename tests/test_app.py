@@ -194,6 +194,52 @@ def test_abnormal_worker_exit_is_visible_without_error_file(tmp_path, small, con
     assert detail["error"] == {"message": "工作进程异常退出", "exit_code": 7}
 
 
+def test_run_export_progress_and_status_do_not_count_holdout_views(tmp_path, small, config):
+    app = create_app(tmp_path / "data")
+    store = app.state.store
+    snapshot = store.ingest(**small)
+    single = create_run(store, {"snapshot": snapshot, "config": asdict(config)})
+    execute_run(store, single)
+    held = create_run(store, {"snapshot": snapshot, "config": {**asdict(config), "benchmark": "A"}, "kind": "holdout",
+                              "research": {"test_start": small["sessions"][3], "gap_sessions": 0}})
+    execute_run(store, held)
+
+    def views():
+        with store.connect() as cx:
+            return cx.execute("SELECT views FROM holdouts").fetchone()[0]
+
+    with TestClient(app) as client:
+        status = client.get("/api/status").json()
+        assert {"multi_snapshot", "run_export", "config_defaults"} <= set(status["features"])
+        assert status["config_defaults"]["commission_bps"] == "3" and "start" not in status["config_defaults"]
+        assert status["active_runs"] == []
+        assert client.get(f"/api/runs/{single}/progress").json()["status"] == "completed"
+
+        response = client.get(f"/api/runs/{single}/export?table=trades")
+        assert response.status_code == 200 and response.headers["content-type"].startswith("text/csv")
+        assert f"investment-lab-{single[:10]}-trades.csv" in response.headers["content-disposition"]
+        body = response.content.decode("utf-8")
+        assert body.startswith("﻿date,signal_date,symbol,quantity,price,notional,fee,reason,")
+        assert body.endswith("\r\n") and len(body.splitlines()) == 2
+        assert client.get(f"/api/runs/{single}/export?table=curve").content.decode("utf-8").startswith("﻿date,equity,twr_index,")
+        assert client.get(f"/api/runs/{single}/export?table=secrets").status_code == 400
+        assert client.get("/api/runs/missing/export?table=trades").status_code == 404
+
+        # Progress, tables and exports never count as viewing the holdout result; the detail page does.
+        before = views()
+        assert client.get(f"/api/runs/{held}/progress").json()["kind"] == "holdout"
+        exported = client.get(f"/api/runs/{held}/export?table=curve&section=holdout")
+        assert exported.status_code == 200 and "-holdout-curve.csv" in exported.headers["content-disposition"]
+        assert client.get(f"/api/runs/{held}/export?table=curve&section=other").status_code == 400
+        assert client.get(f"/api/runs/{held}/table?table=trades&section=development").status_code == 200
+        assert views() == before
+        detail = client.get(f"/api/runs/{held}?section=holdout").json()
+        assert views() == before + 1
+    # The section benchmark is shown with the section result, with the same period and cash flows.
+    assert detail["result"]["benchmark"]["metrics"]["total_return"] is not None
+    assert detail["result"]["benchmark"]["curve"]
+
+
 def test_pending_and_cancelled_run_details_are_distinct(tmp_path, small, config):
     app = create_app(tmp_path / "data")
     store = app.state.store

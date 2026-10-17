@@ -10,9 +10,11 @@ import shutil
 
 PROJECT = Path(__file__).resolve().parents[1]
 PAGE_ASSETS = ("index.html", "app.css", "app.js", "worker.js")
+# Interface modules shared with the local app; ui-utils.js stays first because the others build on it.
 SHARED_PAGE_ASSETS = {
-    "ui-utils.js": PROJECT / "src/investment_lab/web/static/ui-utils.js",
-    "strategy-forms.js": PROJECT / "src/investment_lab/web/static/strategy-forms.js",
+    name: PROJECT / "src/investment_lab/web/static" / name
+    for name in ("ui-utils.js", "theme.css", "theme-boot.js", "strategy-forms.js", "strategy-editor.js",
+                 "snapshot-selection.js", "result-views.js", "charts.js")
 }
 CATALOG_PAGE_ASSET = PROJECT / "src/investment_lab/strategies/catalog.json"
 RUNTIME_FILES = (

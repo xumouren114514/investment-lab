@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import gzip
 import re
 import subprocess
 import sys
 import threading
+from dataclasses import MISSING, fields
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,6 +22,7 @@ from investment_lab.data.store import Store
 from investment_lab.data.validation import coverage
 from investment_lab.data.universe import universe, update_universe
 from investment_lab.jobs import JobManager, create_run
+from investment_lab.engine.models import Config
 from investment_lab.engine.reference import reference_available
 
 _CREDENTIAL_FIELDS = {"token", "api_token", "api_key", "access_token", "secret", "secret_key",
@@ -94,6 +98,63 @@ class ImportBodyLimitMiddleware:
         await send({"type": "http.response.body", "body": payload})
 
 
+def _config_defaults():
+    """Engine defaults let the page restore an old run without restating unchanged settings."""
+    defaults = {}
+    for item in fields(Config):
+        if item.default is not MISSING:
+            defaults[item.name] = item.default
+        elif item.default_factory is not MISSING:
+            defaults[item.name] = item.default_factory()
+    return defaults
+
+
+def _csv_cell(value):
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list, bool)) else str(value)
+    # Spreadsheet programs evaluate cells such as "=..." as formulas; signed numbers stay numbers.
+    if re.match(r"[=+\-@\t\r]", text) and not re.match(r"[-+]?\d", text):
+        text = "'" + text
+    return text
+
+
+_CSV_LEADING_COLUMNS = {
+    "trades": ("date", "signal_date", "symbol", "quantity", "price", "notional", "fee", "reason"),
+    "orders": ("signal_date", "symbol", "quantity", "reason"),
+    "ledger": ("date", "type", "symbol", "amount", "cash", "debt", "reason"),
+    "curve": ("date", "equity", "twr_index", "drawdown", "cash", "debt", "flow"),
+}
+
+
+def _csv_text(rows, leading=()):
+    # Stored results use sorted keys; put the columns people read first in front.
+    columns = [key for key in leading if any(key in row for row in rows)]
+    for row in rows:
+        for key in row:
+            if key not in columns:
+                columns.append(key)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\r\n")
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow([_csv_cell(row.get(key)) for key in columns])
+    return buffer.getvalue()
+
+
+def _section_result(request, result, sample, section):
+    """Pick the single-run result for a rolling window or a holdout section."""
+    if request["kind"] == "rolling":
+        if not 0 <= sample < len(result["samples"]):
+            raise ValueError("窗口索引无效")
+        return result["samples"][sample].get("result", {}), f"-window{sample + 1}"
+    if request["kind"] == "holdout":
+        if section not in ("development", "holdout"):
+            raise ValueError("区间无效")
+        return result[section]["result"], f"-{section}"
+    return result, ""
+
+
 def _contains_credentials(value):
     if isinstance(value, dict):
         return any(str(key).lower() in _CREDENTIAL_FIELDS or _contains_credentials(child)
@@ -144,7 +205,9 @@ def create_app(root=None):
         from investment_lab.maintenance.backup import backup_root, points
         datasets = store.datasets()
         return {"version": __version__, "schema": SCHEMA_VERSION, "data_path": str(store.root), "project_path": str(PROJECT),
-                "features": ["multi_snapshot"],
+                "features": ["multi_snapshot", "run_export", "config_defaults"],
+                "config_defaults": _config_defaults(),
+                "active_runs": [run_id for run_id, process in manager.active.items() if process.poll() is None],
                 "datasets": len(datasets), "real_datasets": sum(not d["manifest"]["synthetic"] for d in datasets), "backups": len(points(backup_root(store))),
                 "last_update": read_json(store.root / "state/last-update.json") if (store.root / "state/last-update.json").exists() else None,
                 "limits": ["真实供应商账号尚未配置或验证；查看数据覆盖", "日线成交与追保是有说明的近似", "本机可信 Python 进程隔离不等于安全沙箱"]}
@@ -305,6 +368,17 @@ def create_app(root=None):
     def runs(offset: int = 0, limit: int = 50):
         return store.runs(max(1, min(limit, 100)), max(0, offset))
 
+    @app.get("/api/runs/{run_id}/progress")
+    def run_progress(run_id: str):
+        # Lightweight polling: never loads a result, so polling a holdout run is not a recorded view.
+        path = within(store.root / "runs", run_id)
+        with store.connect() as cx:
+            row = cx.execute("SELECT status,kind FROM runs WHERE id=?", (run_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="运行记录不存在，请刷新任务列表")
+        return {"status": row["status"], "kind": row["kind"],
+                "progress": read_json(path / "progress.json") if (path / "progress.json").exists() else None}
+
     @app.post("/api/runs/{run_id}/cancel")
     def cancel(run_id: str):
         manager.cancel(run_id)
@@ -329,15 +403,21 @@ def create_app(root=None):
                     "error": error}
         result = read_json(path / "result.json")
         experiments = None
+        # Experiment benchmarks sit beside each window or section, not inside its result.
+        part_benchmark = None
         if request["kind"] == "rolling":
             experiments = {"metadata": result["metadata"], "summary": result["summary"], "samples": [{k: v for k, v in s.items() if k != "result"} for s in result["samples"]]}
             if not 0 <= sample < len(result["samples"]):
                 raise ValueError("窗口索引无效")
-            result = result["samples"][sample].get("result", {})
+            window = result["samples"][sample]
+            # A window keeps only benchmark metrics, so there is no benchmark curve to overlay.
+            part_benchmark = {"metrics": window["benchmark"], "curve": []} if window.get("benchmark") else None
+            result = window.get("result", {})
         elif request["kind"] == "holdout":
             if section not in ("development", "holdout"):
                 raise ValueError("区间无效")
             experiments = {"metadata": result["metadata"], "development": result["development"]["result"]["metrics"], "holdout": result["holdout"]["result"]["metrics"]}
+            part_benchmark = result[section].get("benchmark")
             result = result[section]["result"]
             with store.lock(), store.connect() as cx:
                 cx.execute("UPDATE holdouts SET views=views+1 WHERE id=?", (request["holdout_id"],))
@@ -346,25 +426,39 @@ def create_app(root=None):
         if len(curve) > 650:
             step = max(1, len(curve) // 600)
             reduced["curve"] = curve[::step] + ([curve[-1]] if curve[-1] not in curve[::step] else [])
-        benchmark = result.get("benchmark")
+        benchmark = result.get("benchmark") or part_benchmark
         if benchmark:
             reduced["benchmark"] = {"metrics": benchmark["metrics"], "curve": benchmark["curve"][::max(1, len(benchmark["curve"]) // 600)]}
         return {"request": request, "status": row["status"], "reference_research_available": reference, "result": reduced, "experiments": experiments}
+
+    def finished_run(run_id):
+        path = within(store.root / "runs", run_id)
+        if not (path / "request.json").exists():
+            raise HTTPException(status_code=404, detail="运行记录不存在，请刷新任务列表")
+        if not (path / "result.json").exists():
+            raise HTTPException(status_code=404, detail="该运行还没有可查看的结果")
+        return read_json(path / "request.json"), read_json(path / "result.json")
 
     @app.get("/api/runs/{run_id}/table")
     def run_table(run_id: str, table: str = "trades", offset: int = 0, sample: int = 0, section: str = "holdout"):
         if table not in ("trades", "ledger", "orders"):
             raise ValueError("表名无效")
-        path = within(store.root / "runs", run_id)
-        request, result = read_json(path / "request.json"), read_json(path / "result.json")
-        if request["kind"] == "rolling":
-            result = result["samples"][sample].get("result", {})
-        elif request["kind"] == "holdout":
-            if section not in ("development", "holdout"):
-                raise ValueError("区间无效")
-            result = result[section]["result"]
+        request, result = finished_run(run_id)
+        result, _ = _section_result(request, result, sample, section)
         items = result.get(table, [])
         return {"items": items[max(0, offset):max(0, offset) + 100], "total": len(items)}
+
+    @app.get("/api/runs/{run_id}/export")
+    def export_run_table(run_id: str, table: str = "trades", sample: int = 0, section: str = "holdout"):
+        # Same data as the paged table endpoint, so a holdout export is not another recorded view.
+        if table not in ("trades", "ledger", "orders", "curve"):
+            raise ValueError("表名无效")
+        request, result = finished_run(run_id)
+        result, suffix = _section_result(request, result, sample, section)
+        filename = f"investment-lab-{run_id[:10]}{suffix}-{table}.csv"
+        text = _csv_text(result.get(table, []), _CSV_LEADING_COLUMNS[table])
+        return Response(("\ufeff" + text).encode("utf-8"), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
     @app.get("/api/backups")
     def backups():
