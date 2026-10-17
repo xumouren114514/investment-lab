@@ -31,10 +31,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install_desktop.
 cd $ProjectRoot
 scripts\install.ps1
 scripts\start.ps1
-# 浏览器打开 http://127.0.0.1:8765
+# 浏览器打开 http://127.0.0.1:8766
 ```
 
-端口占用时先确认已有服务，不盲目结束其他进程。可运行 `scripts\start.ps1 -Port 8766`。以 Ctrl+C 停止前台服务；已关闭浏览器不会停止服务。
+端口占用时先确认已有服务，不盲目结束其他进程。可运行 `scripts\start.ps1 -Port 8767`。以 Ctrl+C 停止前台服务；已关闭浏览器不会停止服务。
+
+0.3.1 起默认端口为 8766（8765 留给本机其他程序）。浏览器把命名配置、草稿和显示偏好按“地址+端口”分开保存，换端口后旧端口页面里的这些内容不会自动出现；换端口前先在旧页面导出配置，再到新页面导入。
 
 ```powershell
 .\.venv\Scripts\python -m investment_lab.cli list
@@ -120,7 +122,7 @@ local_config/backup.json 可设 {"root":"E:\\你选择的备份目录"}，目标
 ```powershell
 .\.venv\Scripts\python -m investment_lab.cli restore <backup_id> $RestoreDirectory
 .\.venv\Scripts\python -m investment_lab.cli --data $RestoreDirectory reproduce <原run_id>
-scripts\start.ps1 -Port 8766 -DataDirectory $RestoreDirectory
+scripts\start.ps1 -Port 8767 -DataDirectory $RestoreDirectory
 ```
 
 恢复前校验所有对象，目标已存在则拒绝。恢复后运行数据库完整性/外键检查，加载数据快照；还必须复现回测并启动查询，才算完整演练。恢复命令本身不会假称回测已复现。如恢复点带有 `handover/project/`，先核对其中的历史资料和版本，不能直接覆盖当前源码。验证成功后再停止当前写入、切换 DataDirectory；新数据与个人策略仍保留在原目录。

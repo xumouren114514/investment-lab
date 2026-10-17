@@ -14,7 +14,7 @@
 
 ```powershell
 python scripts/build_pages_site.py --output build/pages
-python -m http.server 8766 --directory build/pages
+python -m http.server 8767 --directory build/pages
 ```
 
 GitHub Pages 已配置为 GitHub Actions 来源；推送 `main` 后会自动构建并部署浏览器版。发布工作流和逐步更新方式见 `.github/workflows/pages.yml`、`docs/HOSTING.md` 与 `scripts/publish_update.ps1`。
@@ -28,7 +28,7 @@ python -m investment_lab.cli init --demo
 python -m investment_lab.cli serve
 ```
 
-默认网页地址为 `http://127.0.0.1:8765`。页面分为策略研究、研究记录、结果比较、数据覆盖、标的池、Python 策略和备份，使用方式见 `docs/OPERATIONS.md`。开发和运行环境要求见 `scripts/install.ps1`、`requirements.lock` 及 `docs/OPERATIONS.md`。自定义 Python 策略会以本机进程权限执行，仅运行自己信任的代码。
+默认网页地址为 `http://127.0.0.1:8766`。页面分为策略研究、研究记录、结果比较、数据覆盖、标的池、Python 策略和备份，使用方式见 `docs/OPERATIONS.md`。开发和运行环境要求见 `scripts/install.ps1`、`requirements.lock` 及 `docs/OPERATIONS.md`。自定义 Python 策略会以本机进程权限执行，仅运行自己信任的代码。
 
 ## 架构和贡献
 

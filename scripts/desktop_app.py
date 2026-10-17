@@ -104,7 +104,7 @@ def spawn_server(data, port, log_path, project=PROJECT, popen=subprocess.Popen):
         return process
 
 
-def ensure_service(data, port=8765, timeout=60, progress=lambda _: None, project=PROJECT):
+def ensure_service(data, port=8766, timeout=60, progress=lambda _: None, project=PROJECT):
     data = Path(data).resolve()
     (data / "state").mkdir(parents=True, exist_ok=True)
     (data / "logs").mkdir(parents=True, exist_ok=True)
@@ -259,7 +259,7 @@ def show_window(data, port):
 
 def main():
     parser = argparse.ArgumentParser(description="投资研究室桌面启动器")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--data", default=os.getenv("INVESTMENT_LAB_DATA", str(PROJECT.parent / "investment_lab_data")))
     parser.add_argument("--ensure-server", action="store_true", help="仅启动/检查服务，输出诊断JSON，不打开窗口")
     args = parser.parse_args()

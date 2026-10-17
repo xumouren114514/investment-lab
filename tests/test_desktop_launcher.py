@@ -125,9 +125,9 @@ def test_start_timeout_cleans_only_the_new_process(tmp_path, monkeypatch):
 
 def test_application_window_uses_separate_profile_and_literal_arguments(tmp_path, monkeypatch):
     monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'Profile With Spaces'))
-    command = desktop.browser_command(Path('C:/Program Files/Edge/msedge.exe'), 'http://127.0.0.1:8765/')
+    command = desktop.browser_command(Path('C:/Program Files/Edge/msedge.exe'), 'http://127.0.0.1:8766/')
     assert command[0] == str(Path('C:/Program Files/Edge/msedge.exe'))
-    assert '--app=http://127.0.0.1:8765/' in command
+    assert '--app=http://127.0.0.1:8766/' in command
     assert f'--user-data-dir={tmp_path / "Profile With Spaces/InvestmentLab/browser-profile"}' in command
     assert not any('remote-debugging' in item or 'disable-web-security' in item for item in command)
 

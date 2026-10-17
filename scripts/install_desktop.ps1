@@ -1,4 +1,4 @@
-﻿param([int]$Port = 8765, [string]$DataDirectory = '')
+﻿param([int]$Port = 8766, [string]$DataDirectory = '')
 $ErrorActionPreference = 'Stop'
 $projectDirectory = Split-Path -Parent $PSScriptRoot
 $pythonExecutable = Join-Path $projectDirectory '.venv\Scripts\pythonw.exe'
@@ -16,7 +16,9 @@ $shell = New-Object -ComObject WScript.Shell
 $arguments = '"{0}" --port {1} --data "{2}"' -f $launcher, $Port, $DataDirectory
 if (Test-Path -LiteralPath $shortcutPath) {
     $existing = $shell.CreateShortcut($shortcutPath)
-    if ($existing.TargetPath -ne $pythonExecutable -or $existing.Arguments -ne $arguments) {
+    # Only replace a shortcut that already runs this project's launcher (port or data may differ).
+    $ownLauncher = $existing.Arguments.StartsWith(('"{0}" ' -f $launcher), [StringComparison]::OrdinalIgnoreCase)
+    if ($existing.TargetPath -ne $pythonExecutable -or -not $ownLauncher) {
         throw "桌面已存在同名入口，未覆盖：$shortcutPath"
     }
 }

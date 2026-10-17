@@ -16,7 +16,7 @@ def main(argv=None):
     init = subs.add_parser("init")
     init.add_argument("--demo", action="store_true")
     serve = subs.add_parser("serve")
-    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--port", type=int, default=8766)
     imp = subs.add_parser("import-json")
     imp.add_argument("file")
     run = subs.add_parser("run")
