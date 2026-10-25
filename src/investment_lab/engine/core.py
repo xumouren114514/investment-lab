@@ -13,9 +13,26 @@ from investment_lab.common import dec, digest, encoded, money
 from .account import Account, ZERO
 from .models import Config, Order
 from .cash_flows import MONTHLY_RULE, resolve_cash_flows
+from .price_limit import limits_for_bar
 from .reference import REFERENCE_MODE, REFERENCE_BASIS, REFERENCE_WARNING, reference_available
 
 STAR_BOARD_RULE_NOT_IMPLEMENTED = "科创板买入最低数量和增量规则待实现"
+
+
+def _touched_limit(order, security: dict, bar: dict) -> bool:
+    """C-启用（2026-10-26）：涨跌停守卫。
+
+    bar 里本来没有 limit_up/limit_down（全仓无生产者），守卫等于死代码。这里按
+    preclose × 板块幅度现算（见 price_limit.py），算不出来就按"未触发"处理——
+    不假装有守卫，也不因缺数据把订单全拒。
+    """
+    lim = limits_for_bar(security, bar)
+    if lim is None:
+        return False
+    up, down = lim
+    if order.remaining > 0:
+        return bar.get("high") is not None and dec(bar["high"]) >= up
+    return bar.get("low") is not None and dec(bar["low"]) <= down
 
 
 def is_shanghai_star_stock(security, symbol):
@@ -493,7 +510,7 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
             failure = None
             if bar is None or bar.get("status", "trading") != "trading" or dec(bar["volume"]) <= 0:
                 failure = "停牌、非挂牌日期或无成交量"
-            elif (order.remaining > 0 and bar.get("limit_up") and dec(bar["high"]) >= dec(bar["limit_up"])) or (order.remaining < 0 and bar.get("limit_down") and dec(bar["low"]) <= dec(bar["limit_down"])):
+            elif _touched_limit(order, sec, bar):
                 failure = "触及价格限制，日线保守拒绝成交"
             elif sec.get("kind") == "future" and day >= sec["expiry"] and order.remaining > 0:
                 failure = "到期日不新开仓"
