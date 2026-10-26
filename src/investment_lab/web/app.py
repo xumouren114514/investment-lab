@@ -113,14 +113,18 @@ def _csv_cell(value):
     if value is None:
         return ""
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list, bool)) else str(value)
-    # Spreadsheet programs evaluate cells such as "=..." as formulas; signed numbers stay numbers.
-    if re.match(r"[=+\-@\t\r]", text) and not re.match(r"[-+]?\d", text):
-        text = "'" + text
+    # C-124：只放过“整格是数字”的单元格；"+5% 现金"/"-3x" 这类必须加前缀，
+    # 否则表格软件会当公式/数值。原来只检查首字符是否数字，会漏掉这些。
+    if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        try:
+            float(text)
+        except ValueError:
+            text = "'" + text
     return text
 
 
 _CSV_LEADING_COLUMNS = {
-    "trades": ("date", "signal_date", "symbol", "quantity", "price", "notional", "fee", "reason"),
+    "trades": ("date", "signal_date", "symbol", "quantity", "price", "notional", "fee", "reason", "forced"),
     "orders": ("signal_date", "symbol", "quantity", "reason"),
     "ledger": ("date", "type", "symbol", "amount", "cash", "debt", "reason"),
     "curve": ("date", "equity", "twr_index", "drawdown", "cash", "debt", "flow"),
@@ -129,7 +133,8 @@ _CSV_LEADING_COLUMNS = {
 
 def _csv_text(rows, leading=()):
     # Stored results use sorted keys; put the columns people read first in front.
-    columns = [key for key in leading if any(key in row for row in rows)]
+    # C-124：空表也要有表头，否则导出的成交 CSV 只剩一个 BOM+空行。
+    columns = list(leading) if not rows else [key for key in leading if any(key in row for row in rows)]
     for row in rows:
         for key in row:
             if key not in columns:

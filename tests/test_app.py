@@ -313,3 +313,19 @@ def test_start_failure_does_not_leave_queued(tmp_path, small, config, monkeypatc
     with store.connect() as cx:
         status = cx.execute("SELECT status FROM runs ORDER BY created DESC LIMIT 1").fetchone()[0]
     assert status == "failed", status
+
+
+def test_csv_empty_table_has_header():
+    """C-124：零成交导出也要有表头，不能只有 BOM+空行。"""
+    from investment_lab.web.app import _CSV_LEADING_COLUMNS, _csv_text
+    text = _csv_text([], _CSV_LEADING_COLUMNS["trades"])
+    assert text.startswith("date,signal_date,symbol"), text[:80]
+
+
+def test_csv_escapes_formula_like_text():
+    """C-124：+5%/-3x 这类文本要加前缀，纯数字不加。"""
+    from investment_lab.web.app import _csv_cell
+    assert _csv_cell("+5% 现金").startswith("'")
+    assert _csv_cell("-3x").startswith("'")
+    assert _csv_cell("-3") == "-3"
+    assert _csv_cell("+5") == "+5"
