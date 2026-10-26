@@ -75,7 +75,8 @@ def rolling(manifest, bars, config, factory, params, interval="month", horizon=6
             benchmark = benchmark_result(manifest, bars, round_config, benchmark_progress)
             if config.benchmark:
                 completed_work += window_length
-            sample = {"start": start, "end": days[end_i], "status": "completed", "metrics": result["metrics"],
+            sample = {"start": start, "end": days[end_i], "sessions": end_i - i + 1,
+                      "status": "completed", "metrics": result["metrics"],
                       "benchmark": benchmark["metrics"] if benchmark else None,
                       "relative_return": result["metrics"]["total_return"] - benchmark["metrics"]["total_return"] if benchmark else None,
                       "result": result}
@@ -90,7 +91,10 @@ def rolling(manifest, bars, config, factory, params, interval="month", horizon=6
                  and isinstance(s.get("metrics"), dict) and isinstance(s["metrics"].get("max_drawdown"), (int, float))]
     if not values:
         raise ValueError("全部滚动窗口被跳过: " + "; ".join(s.get("reason", "") for s in samples[:4]))
+    lengths = [s["sessions"] for s in samples if s["status"] == "completed" and isinstance(s.get("sessions"), int)]
     return {"kind": "rolling", "samples": samples, "summary": {"count": len(values), "skipped": len(samples) - len(values),
+            "window_sessions_min": min(lengths) if lengths else None,
+            "window_sessions_max": max(lengths) if lengths else None,
             "loss_ratio": sum(v < 0 for v in values) / len(values), "median": float(np.median(values)),
             "q10": float(np.quantile(values, .1)), "q90": float(np.quantile(values, .9)), "best": max(values), "worst": min(values),
             # C-108：列表「最大回撤」列原来装的是“最差窗口收益”，不是回撤；这里补真实回撤聚合

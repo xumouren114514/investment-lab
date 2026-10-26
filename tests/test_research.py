@@ -62,6 +62,7 @@ def test_common_end_does_not_claim_fixed_horizon(small, config):
     result = rolling(manifest, small["bars"], config, lambda: SimpleNamespace(on_session=lambda ctx: None),
                      {}, "day", 3, "common_end")
     assert result["metadata"]["horizon_sessions"] is None
+    assert result["summary"]["window_sessions_min"] < result["summary"]["window_sessions_max"]
     assert "长度不等" in result["metadata"]["overlap_warning"]
 
 

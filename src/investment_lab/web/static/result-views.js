@@ -129,7 +129,10 @@
   function rollingHeatmap(experiments, current = 0) {
     const summary = experiments.summary || {};
     return `<section class="report-section"><div class="section-head"><h3>起点热力图</h3><p>${esc(summary.count)} 个有效窗口，亏损比例 ${pct(summary.loss_ratio)}</p></div>`
-      + `<p class="help">${esc(experiments.metadata?.overlap_warning || '')}。中位数 ${pct(summary.median)}，10% / 90% 分位数 ${pct(summary.q10)} / ${pct(summary.q90)}。</p>`
+      + `<p class="help">${esc(experiments.metadata?.overlap_warning || '')}。中位数 ${pct(summary.median)}，10% / 90% 分位数 ${pct(summary.q10)} / ${pct(summary.q90)}。`
+      + (UI.finite(summary.window_sessions_min) !== null && summary.window_sessions_min !== summary.window_sessions_max
+        ? `窗口长度 ${summary.window_sessions_min}–${summary.window_sessions_max} 个交易日不等，分位仅供参考。` : '')
+      + `</p>`
       + `<div class="heatmap">${(experiments.samples || []).map((sample, index) => {
         const ok = sample.status === 'completed';
         return `<button type="button" data-sample="${index}" class="${ok ? UI.tone(sample.metrics?.total_return) : ''}"${index === current ? ' aria-current="true"' : ''} title="${esc(sample.reason || sample.end || '')}"><small>${esc(sample.start)}</small>${ok ? pct(sample.metrics?.total_return) : '跳过'}</button>`;
