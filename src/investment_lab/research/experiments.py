@@ -21,10 +21,11 @@ def benchmark_result(manifest, bars, config, progress=None):
         return None
     from investment_lab.strategies.examples import Builtin
     other = replace(config, symbols=[config.benchmark], benchmark=None, max_leverage="1")
-    result = simulate(manifest, bars, other, Builtin(config.benchmark_strategy), {"weight": "0.95"}, progress)
+    result = simulate(manifest, bars, other, Builtin(config.benchmark_strategy), {"weight": "1"}, progress)
     # C-112：基准只投 95% 权益、剩下 5% 永久现金；不披露的话“超额收益”会被系统性高估
-    result.setdefault("metadata", {})["benchmark_weight"] = "0.95"
-    result["metadata"]["benchmark_note"] = "基准按 95% 仓位买入并持有，5% 现金不计收益；超额收益未扣这部分现金拖累"
+    result.setdefault("metadata", {})["benchmark_weight"] = "1"
+    result["metadata"]["benchmark_note"] = ("基准按 100% 目标仓位买入并持有；整股取整与手续费会留下少量现金，"
+                                            "这部分现金不计收益")
     return result
 
 

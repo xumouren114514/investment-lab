@@ -70,5 +70,5 @@ def test_benchmark_weight_is_disclosed(small, config):
     from dataclasses import replace
     manifest = {k: v for k, v in small.items() if k != "bars"}
     bench = benchmark_result(manifest, small["bars"], replace(config, benchmark="A"))
-    assert bench["metadata"]["benchmark_weight"] == "0.95"
-    assert "95%" in bench["metadata"]["benchmark_note"]
+    assert bench["metadata"]["benchmark_weight"] == "1"
+    assert "100%" in bench["metadata"]["benchmark_note"]
