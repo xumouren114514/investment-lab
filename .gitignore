@@ -33,3 +33,6 @@ build/
 /docs/ACCEPTANCE.md
 /docs/OPEN_RESOURCE_COVERAGE.md
 /docs/STRATEGY_ASSISTANT.md
+
+backups/
+docs/changes/
