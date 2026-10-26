@@ -310,7 +310,6 @@ class JobManager:
                 process.wait(timeout=10)
             except Exception:  # noqa: BLE001
                 pass
-            self.active.pop(run_id, None)
         else:
             # C-121：服务重启后 active 为空；若 pid 还活着（CLI worker）就杀掉，否则直接标记。
             # 已完成/失败的记录不会被覆盖。
