@@ -20,6 +20,10 @@ from investment_lab.engine import price_limit as pl
     ("600000", "10.00", True, ("10.50", "9.50")),
     ("300750", "10.00", True, ("12.00", "8.00")),   # 创业 ST 仍 20%
     ("600000", "10.01", False, ("11.01", "9.01")),  # 四舍五入到分
+    ("920001", "10.00", False, ("13.00", "7.00")),  # 北交所新代码段 920xxx
+    ("689009", "10.00", False, ("12.00", "8.00")),  # 科创板 CDR
+    ("605001", "10.00", True, ("10.50", "9.50")),   # 沪主板 ST
+    ("003816", "10.00", False, ("11.00", "9.00")),  # 深主板 003
 ])
 def test_limits_for(symbol, preclose, is_st, expect):
     got = pl.limits_for(symbol, preclose, is_st)
