@@ -259,7 +259,10 @@ def test_suspension_and_price_limits(small, config):
     small["bars"][1]["status"] = "suspended"
     result = run_small(small, replace(config, order_lifetime=2), once(50))
     assert result["trades"][0]["date"] == "2024-01-08"
-    small["bars"][2]["limit_up"] = "11"
+    # 2026-10-26：引擎不再读 bar["limit_up"]（全仓无人生产），改由 preclose + 板块幅度现算；
+    # 合成标的 "A" 没有 6 位代码，显式给 limit_ratio。
+    small["securities"]["A"]["limit_ratio"] = "0.10"
+    small["bars"][2].update(preclose="10", high="11.0", low="9.0")
     result = run_small(small, replace(config, order_lifetime=2), once(50))
     assert not result["trades"]
 
@@ -311,3 +314,13 @@ def test_listing_warmup_and_late_data(small, config):
     small["bars"][0]["available_at"] = "2024-01-06T00:00:00+00:00"
     with pytest.raises(ValueError, match="晚于"):
         run_small(small, config, once(10))
+
+
+def test_price_limit_uses_derived_previous_close(small, config):
+    """C-092：bar 没有 preclose（Tushare/EODHD/Yahoo 都不写）时，用上一有效收盘兜底。"""
+    small["securities"]["A"]["symbol"] = "sh.600519"      # 真实快照的形态
+    small["securities"]["A"]["is_st"] = "0"               # BaoStock 字符串，不能当 ST
+    small["bars"][1]["close"] = "10"                      # 上一有效收盘
+    small["bars"][2].update(high="11.0", low="9.0", close="10.5")   # 高开触及 10% 涨停
+    result = run_small(small, replace(config, order_lifetime=2), once(50))
+    assert not result["trades"], result["trades"]

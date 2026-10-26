@@ -19,14 +19,31 @@ from .reference import REFERENCE_MODE, REFERENCE_BASIS, REFERENCE_WARNING, refer
 STAR_BOARD_RULE_NOT_IMPLEMENTED = "科创板买入最低数量和增量规则待实现"
 
 
-def _touched_limit(order, security: dict, bar: dict) -> bool:
+def _preclose_for(symbol, bar, prices):
+    """涨跌停的基准：bar 自带的 preclose，否则用引擎里上一有效收盘（含停牌延续）。
+
+    真实数据只有 BaoStock 归一化器写 preclose；Tushare/EODHD/Yahoo/CFFEX 都没有，
+    不能因此让守卫静默失效。
+    """
+    raw = bar.get("preclose")
+    if raw not in (None, "", 0):
+        try:
+            value = dec(raw)
+            if value is not None and value > 0:
+                return value
+        except Exception:  # noqa: BLE001
+            pass
+    return prices.get(symbol)
+
+
+def _touched_limit(order, security: dict, bar: dict, preclose=None) -> bool:
     """C-启用（2026-10-26）：涨跌停守卫。
 
     bar 里本来没有 limit_up/limit_down（全仓无生产者），守卫等于死代码。这里按
     preclose × 板块幅度现算（见 price_limit.py），算不出来就按"未触发"处理——
     不假装有守卫，也不因缺数据把订单全拒。
     """
-    lim = limits_for_bar(security, bar)
+    lim = limits_for_bar(security, bar, preclose)
     if lim is None:
         return False
     up, down = lim
@@ -510,7 +527,7 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
             failure = None
             if bar is None or bar.get("status", "trading") != "trading" or dec(bar["volume"]) <= 0:
                 failure = "停牌、非挂牌日期或无成交量"
-            elif _touched_limit(order, sec, bar):
+            elif _touched_limit(order, sec, bar, _preclose_for(order.symbol, bar, prices)):
                 failure = "触及价格限制，日线保守拒绝成交"
             elif sec.get("kind") == "future" and day >= sec["expiry"] and order.remaining > 0:
                 failure = "到期日不新开仓"
