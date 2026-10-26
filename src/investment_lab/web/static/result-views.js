@@ -58,9 +58,9 @@
   function metrics(m = {}, {currency = ''} = {}) {
     const items = [
       metric('时间加权收益', pct(m.total_return), {tone: UI.tone(m.total_return), lead: true}),
-      metric('年化收益', pct(m.annualized_return), {tone: UI.tone(m.annualized_return)}),
+      metric('年化收益', pct(m.annualized_return), {tone: UI.tone(m.annualized_return), note: '按日历年 365.25 复利；不足一年显示 —'}),
       metric('最大回撤', pct(m.max_drawdown), {tone: UI.tone(m.max_drawdown)}),
-      metric('波动率', pct(m.volatility)),
+      metric('波动率', pct(m.volatility), {note: '日收益标准差 × √252（交易日年化）'}),
       metric('期末权益', num(m.final_equity), {unit: currency}),
       metric('净利润', num(m.net_profit), {tone: UI.tone(m.net_profit), note: '入金不计为利润', unit: currency}),
       metric('净入金', num(m.net_flows), {unit: currency}),
