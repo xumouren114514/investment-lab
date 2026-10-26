@@ -370,3 +370,12 @@ def test_suspended_bar_does_not_reprice_or_expire(small, config):
     curve = result["curve"]
     assert curve[1]["equity"] == curve[0]["equity"], (curve[0], curve[1])   # 不被 999 重估
     assert not any(e["type"] == "order_expired" for e in result["ledger"]), result["ledger"]
+
+
+def test_close_research_is_marked_as_research_only(small, config):
+    """C-098：收盘价成交的模式必须带显式研究与成交价标记，不能看起来像真实回测。"""
+    result = run_small(small, replace(config, mode="close_research"), once(10))
+    meta = result["metadata"]
+    assert meta["execution_price_basis"] == "close", meta
+    assert meta["research_warning"] and "收盘价" in meta["research_warning"], meta
+    assert meta["point_in_time_prices_verified"] is False, meta

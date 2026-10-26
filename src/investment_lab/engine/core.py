@@ -731,12 +731,18 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
     return {"curve": curve, "trades": trades, "orders": orders, "ledger": account.ledger,
             "metrics": metrics(curve, trades, config.initial_cash, account.realized),
             "metadata": {"price_model": config.mode, "valuation": "拆股调整参考收盘价" if reference else "股票收盘价/期货结算价", "synthetic": manifest["synthetic"],
+                         # C-098（审计第 5 条）：close_research 用收盘价成交，不是真实可成交回测；
+                         # 给下游一个显式字段，别只靠 price_model 字符串判断。
+                         "execution_price_basis": ("reference_adjusted_close" if reference else
+                                                   ("close" if config.mode == "close_research" else "vwap")),
                          "cash_flow_schedule": deepcopy(config.cash_flows), "cash_flows": cash_flows,
                          "monthly_deposit_rule": MONTHLY_RULE if "monthly" in config.cash_flows else None,
-                         "reference_only": reference, "research_warning": REFERENCE_WARNING if reference else None,
+                         "reference_only": reference,
+                         "research_warning": (REFERENCE_WARNING if reference else
+                                              ("以收盘价成交，不是真实可成交回测；仅供研究" if config.mode == "close_research" else None)),
                          "corporate_action_policy": "忽略拆股及现金分红；仅价格收益，不含股息" if reference else "事件分别记账",
                          "reference_units": "调整后参考份额，不是历史实际股数" if reference else None,
-                         "point_in_time_prices_verified": False if reference else None,
+                         "point_in_time_prices_verified": (False if (reference or config.mode == "close_research") else None),
                          "currency": securities[config.symbols[0]]["currency"], "assumptions": config.assumptions,
                          "notes": notes, "strategy_diagnostics": strategy_diagnostics, "strategy_diagnostics_omitted": diagnostic_omitted,
                          "bankrupt": bankrupt, "signal_model": "当日数据可用后决策，数量固定，下一交易日结算成交",
