@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import date
+from decimal import Decimal
 import numpy as np
 
 from investment_lab.engine.core import prepare_bars, simulate
@@ -16,12 +17,36 @@ def research_metadata(config):
     return metadata
 
 
+class _RebalancedBenchmark:
+    """C-119：买入持有的基准也要把新增现金（月度入金/一次性入金）投进去。
+
+    原来 `buy_hold` 只在下单一次，后续入金永远留在现金里，长期会把基准收益严重压低、
+    把策略的超额收益抬高。这里：首次按目标权重买入；之后有现金且没有在途订单时补投。
+    """
+
+    def __init__(self, weight="1"):
+        self.weight = Decimal(str(weight))
+
+    def on_session(self, ctx):
+        symbol = ctx.symbols[0] if ctx.symbols else None
+        if not symbol:
+            return
+        if any((order or {}).get("symbol") == symbol for order in (ctx.pending or ())):
+            return
+        if not ctx.state.get("ordered"):
+            ctx.order_target_weight(symbol, self.weight, "基准初始配置")
+            ctx.state["ordered"] = True
+            return
+        equity = ctx.equity if ctx.equity > 0 else Decimal("1")
+        if ctx.cash > equity * Decimal("0.001"):   # 忽略手续费找零，避免天天买一分钱
+            ctx.order_value(symbol, ctx.cash, "基准投入新增现金")
+
+
 def benchmark_result(manifest, bars, config, progress=None):
     if not config.benchmark:
         return None
-    from investment_lab.strategies.examples import Builtin
     other = replace(config, symbols=[config.benchmark], benchmark=None, max_leverage="1")
-    result = simulate(manifest, bars, other, Builtin(config.benchmark_strategy), {"weight": "1"}, progress)
+    result = simulate(manifest, bars, other, _RebalancedBenchmark("1"), {"weight": "1"}, progress)
     # C-112：基准只投 95% 权益、剩下 5% 永久现金；不披露的话“超额收益”会被系统性高估
     result.setdefault("metadata", {})["benchmark_weight"] = "1"
     result["metadata"]["benchmark_note"] = ("基准按 100% 目标仓位买入并持有；整股取整与手续费会留下少量现金，"

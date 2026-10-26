@@ -73,3 +73,17 @@ def test_benchmark_weight_is_disclosed(small, config):
     bench = benchmark_result(manifest, small["bars"], replace(config, benchmark="A"))
     assert bench["metadata"]["benchmark_weight"] == "1"
     assert "100%" in bench["metadata"]["benchmark_note"]
+
+
+def test_benchmark_reinvests_cash_flows(small, config):
+    """C-119：基准收到新增入金后要投出去，不能永远留在现金里。"""
+    from dataclasses import replace
+    for bar in small["bars"]:
+        if bar["date"] >= "2024-01-08":
+            bar.update(open="11", high="11", low="11", close="11", vwap_value="11")
+    manifest = {k: v for k, v in small.items() if k != "bars"}
+    cfg = replace(config, benchmark="A", cash_flows={"2024-01-08": "500"})
+    bench = benchmark_result(manifest, small["bars"], cfg)
+    buys = [t for t in bench["trades"] if float(t["quantity"]) > 0]
+    assert len(buys) >= 2, buys
+    assert sum(float(t["quantity"]) for t in buys) > 99, buys
