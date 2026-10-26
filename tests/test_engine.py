@@ -353,8 +353,9 @@ def test_win_rate_does_not_double_count_fees(small, config):
             ctx.order_shares("A", -pos); ctx.state["sold"] = True
     result = run_small(small, replace(config, commission_bps="100"), SimpleNamespace(on_session=strat))
     assert result["metrics"]["trades"] >= 2, result["metrics"]
-    # 毛差价 +1.00；若 realized 再扣一次手续费（约 10）会被判成亏损
-    assert result["metrics"]["win_rate"] == 1.0, result["metrics"]
+    # 毛价差 +10，买入费已在成本基准里、卖出费再扣 → 净略亏；旧口径（扣一次卖出费）是对的，
+    # 2026-10-26 的 C-096 误删了卖出费，已回退。
+    assert result["metrics"]["win_rate"] == 0.0, result["metrics"]
 
 
 def test_suspended_bar_does_not_reprice_or_expire(small, config):
