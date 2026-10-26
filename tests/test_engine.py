@@ -355,3 +355,18 @@ def test_win_rate_does_not_double_count_fees(small, config):
     assert result["metrics"]["trades"] >= 2, result["metrics"]
     # 毛差价 +1.00；若 realized 再扣一次手续费（约 10）会被判成亏损
     assert result["metrics"]["win_rate"] == 1.0, result["metrics"]
+
+
+def test_suspended_bar_does_not_reprice_or_expire(small, config):
+    """C-097：停牌日不重估、不进历史、也不燃烧订单有效期。"""
+    small["bars"][1].update(status="suspended", volume="0", close="999", vwap_value="999")
+    got = {"n": 0}
+    def strat(ctx):
+        got["n"] += 1
+        if not ctx.state.get("sent"):
+            ctx.order_shares("A", 100)      # 停牌当天下的单：不该因为停牌而耗尽有效期
+            ctx.state["sent"] = True
+    result = run_small(small, replace(config, order_lifetime=1), SimpleNamespace(on_session=strat))
+    curve = result["curve"]
+    assert curve[1]["equity"] == curve[0]["equity"], (curve[0], curve[1])   # 不被 999 重估
+    assert not any(e["type"] == "order_expired" for e in result["ledger"]), result["ledger"]

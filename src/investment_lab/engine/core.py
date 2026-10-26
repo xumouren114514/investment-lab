@@ -521,9 +521,13 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
         used_volume = {}
         # Orders are submitted in signal order, with margin liquidations first.
         for order in sorted(list(pending), key=lambda o: (not o.forced, o.id)):
-            order.age += 1
             sec = securities[order.symbol]
             bar = rows.get(order.symbol)
+            # C-097：标的当天停牌/无成交时不消耗订单有效期——订单是"市场没开门"，
+            # 不是"策略没成交"，原来会被 order_expired 误杀。
+            vol = None if bar is None else bar.get("volume")
+            if bar is not None and bar.get("status", "trading") == "trading" and (vol is None or dec(vol) > 0):
+                order.age += 1
             failure = None
             if bar is None or bar.get("status", "trading") != "trading" or dec(bar["volume"]) <= 0:
                 failure = "停牌、非挂牌日期或无成交量"
@@ -640,6 +644,10 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                 if order.remaining:
                     account.event(day, "order_expired", order_id=order.id, remaining=order.remaining)
         for symbol, bar in rows.items():
+            # C-097：停牌/零成交量 bar 只作状态，不进策略历史窗口，也不拿它重估价格
+            vol = bar.get("volume")
+            if bar.get("status", "trading") != "trading" or (vol is not None and dec(vol) <= 0):
+                continue
             prices[symbol] = dec(bar["settlement"] if securities[symbol].get("kind") == "future" else bar["close"])
             histories[symbol].append(bar)
         account.settle_futures(day, rows, securities)
