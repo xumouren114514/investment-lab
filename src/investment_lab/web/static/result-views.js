@@ -174,7 +174,10 @@
     const runs = [{label: definition.label, className: definition.className || 's0', area: !!definition.area,
       points: (result?.curve || []).map(row => ({date: row.date, value: UI.finite(row[definition.key])}))}];
     if (definition.key === 'twr_index' && benchmark && result?.benchmark?.curve?.length) {
-      runs.push({label: '基准（相同期间与资金流）', className: 'sb',
+      const weight = UI.finite(result?.benchmark?.metadata?.benchmark_weight);
+      const label = weight === null ? '基准（相同期间与资金流）'
+        : `基准（${(weight * 100).toFixed(0)}% 仓位买入持有，${((1 - weight) * 100).toFixed(0)}% 现金）`;
+      runs.push({label, className: 'sb',
         points: result.benchmark.curve.map(row => ({date: row.date, value: UI.finite(row.twr_index)}))});
     }
     const aligned = Charts.alignByDate(runs);

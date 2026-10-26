@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from investment_lab.data.store import Store
 from investment_lab.jobs import create_run, execute_run, reproduce
-from investment_lab.research.experiments import rolling, holdout
+from investment_lab.research.experiments import rolling, holdout, benchmark_result
 
 
 def test_rolling_independent_state_and_account(small, config):
@@ -63,3 +63,12 @@ def test_common_end_does_not_claim_fixed_horizon(small, config):
                      {}, "day", 3, "common_end")
     assert result["metadata"]["horizon_sessions"] is None
     assert "长度不等" in result["metadata"]["overlap_warning"]
+
+
+def test_benchmark_weight_is_disclosed(small, config):
+    """C-112：基准只投 95% 权益，必须在 metadata 里披露，避免超额收益被高估。"""
+    from dataclasses import replace
+    manifest = {k: v for k, v in small.items() if k != "bars"}
+    bench = benchmark_result(manifest, small["bars"], replace(config, benchmark="A"))
+    assert bench["metadata"]["benchmark_weight"] == "0.95"
+    assert "95%" in bench["metadata"]["benchmark_note"]
