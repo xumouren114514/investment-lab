@@ -149,11 +149,15 @@ def execute_run(store, run_id):
             return
         progress_clock["written_at"] = stamp
         eta = remaining / rate if rate and remaining else 0 if not remaining else None
-        with store.lock():
+        # C-123：progress.json 是每次运行自己的文件，不该抢全局写锁——
+        # 备份/导入持锁超过 30 秒时原来会把整个回测判死。写失败也只丢一次进度，不能中断运行。
+        try:
             atomic_write(run_dir / "progress.json", {"done": done, "total": total, "updated": now(),
                                                        "elapsed_seconds": round(stamp - progress_clock["started"], 2),
                                                        "eta_seconds": round(eta, 1) if eta is not None else None,
                                                        "sessions_per_second": round(rate, 2) if rate else None})
+        except OSError:
+            pass
     try:
         status("running")
         if request["engine_hash"] != code_fingerprint():

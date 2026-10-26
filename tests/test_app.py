@@ -298,3 +298,18 @@ def test_cancel_does_not_overwrite_completed(tmp_path, small, config):
         app.state.manager.cancel(run_id)
     with store.connect() as cx:
         assert cx.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()[0] == "completed"
+
+
+def test_start_failure_does_not_leave_queued(tmp_path, small, config, monkeypatch):
+    """C-123：start 失败时刚落的 queued 行必须收尾成 failed，不能永久排队。"""
+    app = create_app(tmp_path / "data")
+    store = app.state.store
+    snapshot = store.ingest(**small)
+    monkeypatch.setattr(app.state.manager, "start", lambda run_id: (_ for _ in ()).throw(ValueError("已有任务")))
+    with TestClient(app) as client:
+        r = client.post("/api/runs", json={"snapshot": snapshot, "config": asdict(config)},
+                        headers={"X-Lab-Request": "local-ui"})
+    assert r.status_code == 400, r.text
+    with store.connect() as cx:
+        status = cx.execute("SELECT status FROM runs ORDER BY created DESC LIMIT 1").fetchone()[0]
+    assert status == "failed", status

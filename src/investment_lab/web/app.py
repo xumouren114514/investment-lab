@@ -375,7 +375,14 @@ def create_app(root=None):
         if any(p.poll() is None for p in manager.active.values()):
             raise ValueError("计算任务正在运行，请等待或取消")
         run_id = create_run(store, body)
-        manager.start(run_id)
+        try:
+            manager.start(run_id)
+        except ValueError as exc:
+            # C-123：start 失败（并发占位/启动错误）时把已落库的 queued 记录收尾，别留永久“排队中”
+            with store.lock(), store.connect() as cx:
+                cx.execute("UPDATE runs SET status='failed',summary=? WHERE id=?",
+                           (json.dumps({"message": f"未能启动：{exc}"}, ensure_ascii=False), run_id))
+            raise
         return {"run_id": run_id}
 
     @app.get("/api/runs")
