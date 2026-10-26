@@ -607,7 +607,7 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                         else:
                             pnl = money(qty * multiplier * (price - basis))
                             account.credit(pnl) if pnl >= 0 else account.debit(-pnl)
-                            account.realized.append(float(pnl - fee))
+                            account.realized.append(float(pnl))   # C-096：fee 已在现金扣过
                     elif sign > 0:
                         account.debit(qty * price + fee)
                     else:
@@ -618,7 +618,7 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                             account.unsettled.append({"amount": str(proceeds), "due": session_index + int(rule["cash_settlement_days"])})
                         else:
                             account.credit(proceeds)
-                        account.realized.append(float(money(qty * (price - old_basis) - fee)))
+                        account.realized.append(float(money(qty * (price - old_basis))))   # C-096：fee 已在现金扣过
                     account.positions[order.symbol] = old_qty + sign * qty
                     if sign > 0:
                         account.cost_basis[order.symbol] = (old_qty * old_basis + qty * price + fee / multiplier) / (old_qty + qty)

@@ -339,3 +339,19 @@ def test_futures_maintenance_margin_not_stock_leverage(small, config):
     # 这组参数下名义额必须 > 4×权益，否则原实现（equity/名义额 < 0.25）也不会触发，
     # 这条测试就失去回归意义。
     assert any(float(t["notional"]) > 4000 for t in held), held
+
+
+def test_win_rate_does_not_double_count_fees(small, config):
+    """C-096：毛盈利 1、手续费 10 的交易不该被算成亏损（fee 已在现金扣一次）。"""
+    small["bars"][2]["close"] = "10.2"       # 卖出成交日（信号次日）的价格：毛盈利 10
+    small["bars"][2]["vwap_value"] = "10.2"
+    def strat(ctx):
+        pos = ctx.positions.get("A", 0)
+        if not ctx.state.get("bought"):
+            ctx.order_shares("A", 100); ctx.state["bought"] = True
+        elif pos > 0 and not ctx.state.get("sold"):
+            ctx.order_shares("A", -pos); ctx.state["sold"] = True
+    result = run_small(small, replace(config, commission_bps="100"), SimpleNamespace(on_session=strat))
+    assert result["metrics"]["trades"] >= 2, result["metrics"]
+    # 毛差价 +1.00；若 realized 再扣一次手续费（约 10）会被判成亏损
+    assert result["metrics"]["win_rate"] == 1.0, result["metrics"]
