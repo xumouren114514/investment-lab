@@ -31,7 +31,14 @@ function notice(text, error = false) {
 async function api(path, body) {
   const response = await fetch('/api' + path, body === undefined ? {} : {method: 'POST',
     headers: {'Content-Type': 'application/json', 'X-Lab-Request': 'local-ui'}, body: JSON.stringify(body)});
-  const data = await response.json();
+  // C-125：非 JSON 错误（例如代理返回的 500 纯文本）也要给人话，不要抛 "Unexpected token 'I'"
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (_) {
+    data = {detail: text ? text.slice(0, 200) : `HTTP ${response.status}`};
+  }
   if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
   return data;
 }
