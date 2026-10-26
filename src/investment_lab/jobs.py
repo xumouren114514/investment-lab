@@ -122,6 +122,8 @@ def execute_run(store, run_id):
     from investment_lab.research.experiments import benchmark_result, holdout, rolling
     run_dir = within(store.root / "runs", run_id)
     request = read_json(run_dir / "request.json")
+    # C-121：记录 worker pid。服务重启后用它判断这条 queued/running 是不是孤儿。
+    atomic_write(run_dir / "progress.json", {"pid": os.getpid(), "done": 0, "total": 1, "updated": now()})
     original_sys_path = list(sys.path)
     def status(value, summary=None):
         with store.lock(), store.connect() as cx:
@@ -219,6 +221,44 @@ def execute_run(store, run_id):
         sys.path[:] = original_sys_path
 
 
+def _run_pid(run_dir):
+    """progress.json 里的 worker pid；不存在/坏文件返回 None。"""
+    try:
+        data = read_json(run_dir / "progress.json")
+    except (OSError, ValueError):
+        return None
+    return data.get("pid") if isinstance(data, dict) else None
+
+
+def reconcile(store) -> list[str]:
+    """C-121：把“没有活进程”的 queued/running 标记为 interrupted。
+
+    服务重启/崩溃后 JobManager.active 是空的，原来这些运行会永久停在“计算中/排队中”，
+    取消还会 400。这里按 worker 写入的 pid 判断存活；CLI 正在跑的 worker（pid 还活着）不动。
+    """
+    import psutil
+    fixed = []
+    with store.lock(), store.connect() as cx:
+        rows = cx.execute("SELECT id FROM runs WHERE status IN ('queued','running')").fetchall()
+        for (run_id,) in rows:
+            run_dir = within(store.root / "runs", run_id)
+            pid = _run_pid(run_dir)
+            alive = False
+            if isinstance(pid, int) and pid > 0:
+                try:
+                    alive = psutil.Process(pid).is_running()
+                except psutil.Error:
+                    alive = False
+            if alive:
+                continue
+            message = "上次服务/进程中断，任务未完成（可重新提交）"
+            cx.execute("UPDATE runs SET status='interrupted',summary=? WHERE id=?",
+                       (encoded({"message": message}).decode(), run_id))
+            atomic_write(run_dir / "error.json", {"message": message})
+            fixed.append(run_id)
+    return fixed
+
+
 class JobManager:
     def __init__(self, store):
         self.store, self.active = store, {}
@@ -258,18 +298,37 @@ class JobManager:
     def cancel(self, run_id, reason="用户取消"):
         import psutil
         process = self.active.get(run_id)
-        if process is None or process.poll() is not None:
-            raise ValueError("任务已结束或不属于当前服务")
-        try:
-            parent = psutil.Process(process.pid)
-            for child in parent.children(recursive=True):
-                child.kill()
-            parent.kill()
-        except psutil.NoSuchProcess:
-            pass
-        process.wait(timeout=10)
+        if process is not None and process.poll() is None:
+            try:
+                parent = psutil.Process(process.pid)
+                for child in parent.children(recursive=True):
+                    child.kill()
+                parent.kill()
+            except psutil.NoSuchProcess:
+                pass
+            try:
+                process.wait(timeout=10)
+            except Exception:  # noqa: BLE001
+                pass
+            self.active.pop(run_id, None)
+        else:
+            # C-121：服务重启后 active 为空；若 pid 还活着（CLI worker）就杀掉，否则直接标记。
+            # 已完成/失败的记录不会被覆盖。
+            run_dir = within(self.store.root / "runs", run_id)
+            pid = _run_pid(run_dir)
+            if isinstance(pid, int) and pid > 0:
+                try:
+                    parent = psutil.Process(pid)
+                    for child in parent.children(recursive=True):
+                        child.kill()
+                    parent.kill()
+                except psutil.Error:
+                    pass
         with self.store.lock(), self.store.connect() as cx:
-            cx.execute("UPDATE runs SET status='cancelled',summary=? WHERE id=?", (encoded({"message": reason}).decode(), run_id))
+            cur = cx.execute("UPDATE runs SET status='cancelled',summary=? WHERE id=? AND status IN ('queued','running')",
+                             (encoded({"message": reason}).decode(), run_id))
+            if cur.rowcount == 0:
+                raise ValueError("任务已结束")
             atomic_write(self.store.root / "runs" / run_id / "error.json", {"message": reason})
 
 

@@ -167,6 +167,11 @@ def _contains_credentials(value):
 def create_app(root=None):
     store = Store(root)
     manager = JobManager(store)
+    # C-121：服务重启后把无主的 queued/running 收尾，避免永久“计算中”
+    try:
+        jobs.reconcile(store)
+    except Exception:  # noqa: BLE001
+        pass
     app = FastAPI(title="投资研究室", docs_url=None, redoc_url=None)
     app.add_middleware(ImportBodyLimitMiddleware, max_bytes=_MAX_IMPORT_BYTES)
     app.state.store, app.state.manager = store, manager
@@ -191,6 +196,15 @@ def create_app(root=None):
     @app.exception_handler(ValueError)
     async def invalid(request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=400)
+
+    @app.exception_handler(TypeError)
+    async def invalid_type(request, exc):
+        # C-122：Config(**config) 遇到多余/缺失字段抛 TypeError；不能变成 500 纯文本
+        return JSONResponse({"detail": f"配置字段不合法：{exc}"}, status_code=400)
+
+    @app.exception_handler(KeyError)
+    async def missing_field(request, exc):
+        return JSONResponse({"detail": f"缺少字段：{exc}"}, status_code=400)
 
     @app.exception_handler(RuntimeError)
     async def busy(request, exc):

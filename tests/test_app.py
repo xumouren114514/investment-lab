@@ -257,3 +257,44 @@ def test_pending_and_cancelled_run_details_are_distinct(tmp_path, small, config)
     assert cancelled["status"] == "cancelled"
     assert cancelled["error"]["message"] == "用户取消"
     assert cancelled["progress"]["done"] == 2
+
+
+def test_orphan_runs_are_reconciled(tmp_path, small, config):
+    """C-121：服务重启后没有活进程的 running 行要收尾成 interrupted。"""
+    from investment_lab import jobs
+    app = create_app(tmp_path / "data")
+    store = app.state.store
+    snapshot = store.ingest(**small)
+    run_id = create_run(store, {"snapshot": snapshot, "config": asdict(config)})
+    with store.lock(), store.connect() as cx:
+        cx.execute("UPDATE runs SET status='running' WHERE id=?", (run_id,))
+    (store.root / "runs" / run_id / "progress.json").write_text('{"pid": 999999, "done": 1, "total": 2}', encoding="utf-8")
+    fixed = jobs.reconcile(store)
+    assert run_id in fixed
+    with store.connect() as cx:
+        assert cx.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()[0] == "interrupted"
+
+
+def test_malformed_config_returns_json_400(tmp_path, small, config):
+    """C-122：config 里有未知/缺失字段时返回 400 JSON，而不是 500 纯文本。"""
+    app = create_app(tmp_path / "data")
+    snapshot = app.state.store.ingest(**small)
+    with TestClient(app) as client:
+        r = client.post("/api/runs", json={"snapshot": snapshot, "config": {"bogus": 1}},
+                        headers={"X-Lab-Request": "local-ui"})
+    assert r.status_code == 400, r.text
+    assert r.headers["content-type"].startswith("application/json")
+    assert "配置" in r.json()["detail"] or "字段" in r.json()["detail"]
+
+
+def test_cancel_does_not_overwrite_completed(tmp_path, small, config):
+    """C-121：cancel 只改 queued/running，已完成的运行不能被改成 cancelled。"""
+    app = create_app(tmp_path / "data")
+    store = app.state.store
+    run_id = create_run(store, {"snapshot": store.ingest(**small), "config": asdict(config)})
+    with store.lock(), store.connect() as cx:
+        cx.execute("UPDATE runs SET status='completed' WHERE id=?", (run_id,))
+    with pytest.raises(ValueError):
+        app.state.manager.cancel(run_id)
+    with store.connect() as cx:
+        assert cx.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()[0] == "completed"
