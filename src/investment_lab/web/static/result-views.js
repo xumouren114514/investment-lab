@@ -70,7 +70,7 @@
     if (UI.finite(m.relative_return) !== null) items.push(metric('相对基准', pct(m.relative_return),
       {tone: UI.tone(m.relative_return), note: '基准按 100% 目标仓位买入持有，整股与手续费会留少量现金'}));
     if (UI.finite(m.win_rate) !== null) items.push(metric('胜率', pct(m.win_rate),
-      {note: '按卖出成交笔次计；期货为逐日盯市增量，不是完整往返胜率'}));
+      {note: '按平仓/交割的往返计（含双边费用）；股票为每次卖出笔次'}));
     if (UI.finite(m.money_weighted_return) !== null) items.push(metric('资金加权收益', pct(m.money_weighted_return), {tone: UI.tone(m.money_weighted_return)}));
     if (UI.finite(m.sharpe_zero_rf) !== null) items.push(metric('夏普（无风险为 0）', num(m.sharpe_zero_rf)));
     if (UI.finite(m.turnover) !== null) items.push(metric('换手倍数', num(m.turnover)));
