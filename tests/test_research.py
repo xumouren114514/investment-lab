@@ -54,3 +54,12 @@ def test_saved_strategy_immutable_reproduce(tmp_path, small, config):
     file.write_text('raise Exception("new code should never run")')
     execute_run(store, run_id)
     assert reproduce(store, run_id)["identical"]
+
+
+def test_common_end_does_not_claim_fixed_horizon(small, config):
+    """C-110：common_end 下窗口长度不等，metadata 不应再谎报固定 horizon。"""
+    manifest = {k: v for k, v in small.items() if k != "bars"}
+    result = rolling(manifest, small["bars"], config, lambda: SimpleNamespace(on_session=lambda ctx: None),
+                     {}, "day", 3, "common_end")
+    assert result["metadata"]["horizon_sessions"] is None
+    assert "长度不等" in result["metadata"]["overlap_warning"]

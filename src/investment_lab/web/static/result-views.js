@@ -67,7 +67,8 @@
       metric('费用 / 融资利息', `${num(m.fees)} / ${num(m.interest)}`),
       metric('成交笔数', num(m.trades, 0)),
     ];
-    if (UI.finite(m.win_rate) !== null) items.push(metric('胜率', pct(m.win_rate)));
+    if (UI.finite(m.win_rate) !== null) items.push(metric('胜率', pct(m.win_rate),
+      {note: '按卖出成交笔次计；期货为逐日盯市增量，不是完整往返胜率'}));
     if (UI.finite(m.money_weighted_return) !== null) items.push(metric('资金加权收益', pct(m.money_weighted_return), {tone: UI.tone(m.money_weighted_return)}));
     if (UI.finite(m.sharpe_zero_rf) !== null) items.push(metric('夏普（无风险为 0）', num(m.sharpe_zero_rf)));
     if (UI.finite(m.turnover) !== null) items.push(metric('换手倍数', num(m.turnover)));
@@ -190,7 +191,8 @@
     // C-109：以引擎的 normal_ranking_eligible 为准；旧结果没有该字段时退回合成/参考判断
     const unranked = items.some(item => item.synthetic || item.reference || item.rankEligible === false);
     const best = key => {
-      if (unranked || items.length < 2) return null;
+      // C-110：区间长度不同的运行比 total_return 等于让长期限必胜；这种情况不标“最优”
+      if (unranked || periods.size > 1 || items.length < 2) return null;
       const values = items.map(item => UI.finite(item.metrics?.[key])).filter(value => value !== null);
       return values.length ? Math.max(...values) : null;
     };
@@ -198,7 +200,7 @@
     const bestReturn = best('total_return'), bestDrawdown = best('max_drawdown');
     const mark = (value, target) => target !== null && UI.finite(value) === target ? ' best' : '';
     const warnings = [
-      periods.size > 1 ? '各运行的区间不同，曲线按日期对齐显示；比较前先核对时期与资金流。' : '',
+      periods.size > 1 ? '各运行的区间不同，曲线按日期对齐显示；区间不同，不标“最优”，比较前先核对时期与资金流。' : '',
       currencies.size > 1 ? '这些运行使用不同币种：权益不相加，收益率比较也需考虑汇率。' : '',
       unranked ? '包含合成演示、参考历史价格或收盘价研究：只作流程或参考比较，不标记最优。' : '',
       items.some(item => item.closeResearch) ? '收盘价研究按收盘价成交，不是真实可成交回测；其收益与回撤不能与严格执行结果直接比较。' : '',

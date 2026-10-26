@@ -91,7 +91,12 @@ def rolling(manifest, bars, config, factory, params, interval="month", horizon=6
             # C-108：列表「最大回撤」列原来装的是“最差窗口收益”，不是回撤；这里补真实回撤聚合
             "worst_drawdown": min(drawdowns) if drawdowns else None,
             "median_drawdown": float(np.median(drawdowns)) if drawdowns else None},
-            "metadata": {**research_metadata(config), "interval": interval, "horizon_sessions": horizon, "end_mode": end_mode, "overlap_warning": "重叠窗口并非独立样本；不是样本外验证"}}
+            "metadata": {**research_metadata(config), "interval": interval,
+                         # C-110：common_end 时窗口长度不等，horizon 并不生效，不能谎报成固定 horizon
+                         "horizon_sessions": horizon if end_mode == "fixed_length" else None,
+                         "end_mode": end_mode,
+                         "overlap_warning": "重叠窗口并非独立样本；不是样本外验证"
+                                           + ("；common_end 下窗口长度不等，分位不可直接比较" if end_mode != "fixed_length" else "")}}
 
 
 def holdout(manifest, bars, config, factory, params, test_start, gap_sessions=0, progress=None):
