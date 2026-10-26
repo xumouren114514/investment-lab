@@ -324,3 +324,18 @@ def test_price_limit_uses_derived_previous_close(small, config):
     small["bars"][2].update(high="11.0", low="9.0", close="10.5")   # 高开触及 10% 涨停
     result = run_small(small, replace(config, order_lifetime=2), once(50))
     assert not result["trades"], result["trades"]
+
+
+def test_futures_maintenance_margin_not_stock_leverage(small, config):
+    """C-095：期货不能用股票融资口径（equity/名义额）强平；只看维持保证金。"""
+    small["securities"]["A"].update(kind="future", multiplier="10", tick="0.1",
+                                    expiry="2024-01-30", initial_margin=".1", maintenance_margin=".05")
+    for b in small["bars"]:
+        b.update(open="10", close="10", high="11", low="9", vwap_value="10", settlement="10")
+    result = run_small(small, replace(config, max_leverage="5"), once(200))
+    assert not any(e["type"] == "margin_call" for e in result["ledger"]), result["ledger"]
+    held = [t for t in result["trades"] if t["symbol"] == "A"]
+    assert held, "应当有成交（数量可能被现金/杠杆闸门限制）"
+    # 这组参数下名义额必须 > 4×权益，否则原实现（equity/名义额 < 0.25）也不会触发，
+    # 这条测试就失去回归意义。
+    assert any(float(t["notional"]) > 4000 for t in held), held

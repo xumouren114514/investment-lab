@@ -685,7 +685,16 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
             orders.append({"id": order.id, "symbol": symbol, "quantity": str(quantity), "signal_date": day, "reason": reason, "visible": visible})
             return order.id
         maintenance_margin = sum((q * prices[s] * dec(securities[s].get("multiplier", 1)) * dec(securities[s].get("maintenance_margin", 0)) for s, q in account.positions.items() if securities[s].get("kind") == "future"), ZERO)
-        breached = (exposure and equity / exposure < dec(config.maintenance_equity_ratio)) or (maintenance_margin and account.cash - account.debt < maintenance_margin)
+        # 期货修正（2026-10-26）：原来把"股票融资杠杆比 equity/exposure"套在期货名义额上，
+        # 任何 名义 > 4×权益 的合法期货仓位都会在开仓当日被 margin_call（而 initial_margin
+        # 只占名义 10%、建仓闸门与期货专用维持保证金都还有余量）。期货只看维持保证金；
+        # 股票融资才看 equity/股票市值。
+        stock_exposure = sum((q * prices[s] * dec(securities[s].get("multiplier", 1))
+                              for s, q in account.positions.items() if securities[s].get("kind") != "future"), ZERO)
+        stock_breach = bool(stock_exposure and account.debt) and \
+            equity / stock_exposure < dec(config.maintenance_equity_ratio)
+        futures_breach = bool(maintenance_margin) and account.cash - account.debt < maintenance_margin
+        breached = stock_breach or futures_breach
         if breached:
             for order in list(pending):
                 account.event(day, "order_cancelled_margin", order_id=order.id)
