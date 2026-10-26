@@ -341,8 +341,12 @@ def rule_for(config, security, symbol, day):
         if item["effective"] <= day and item.get("market", security["market"]) == security["market"] and item.get("symbol", symbol) == symbol:
             rule.update({k: v for k, v in item.items() if k in rule})
     if config.mode == REFERENCE_MODE:
-        # Adjusted reference units are not historical exchange board lots.
+        # C-099：参考模式的份额是"调整后参考份额"，不是历史交易所整手；
+        # 既然 lot 改成 1，最低申报数量也必须同步改成 1，否则 95 股这种
+        # 合法参考仓位会被"最低申报 100 股"拒掉（test_reference 长期失败的原因）。
         rule["lot"] = 1
+        rule["minimum_buy_quantity"] = 1
+        rule["minimum_sell_quantity"] = 1
     if (dec(rule["lot"]) < 1 or dec(rule["minimum_buy_quantity"]) < dec(rule["lot"])
             or dec(rule["minimum_sell_quantity"]) < dec(rule["lot"])
             or any(dec(rule[k]) < 0 for k in ("commission_bps", "minimum_commission", "sell_tax_bps"))
