@@ -13,9 +13,9 @@
   const DIAGNOSTIC_ACTIONS = {skip_signal: '等待完整指标后发出信号', base_purchase: '按基础金额定投', partial_window_signal: '使用已知的短历史窗口'};
 
   const COLUMN_LABELS = {date: '日期', signal_date: '信号日期', symbol: '证券', side: '方向', quantity: '数量', price: '价格', fee: '费用',
-    reason: '原因', visible: '可见数据摘要', type: '事件', amount: '金额', cash: '现金', debt: '借款', notional: '成交额'};
+    reason: '原因', visible: '可见数据摘要', type: '事件', amount: '金额', cash: '现金', debt: '借款', notional: '成交额', forced: '强平'};
   const TABLE_COLUMNS = {
-    trades: ['date', 'signal_date', 'symbol', 'side', 'quantity', 'price', 'fee', 'reason'],
+    trades: ['date', 'signal_date', 'symbol', 'side', 'quantity', 'price', 'fee', 'reason', 'forced'],
     orders: ['signal_date', 'symbol', 'quantity', 'reason', 'visible'],
     ledger: ['date', 'type', 'symbol', 'amount', 'cash', 'debt', 'reason'],
   };
@@ -110,6 +110,7 @@
       const quantity = Number(row.quantity);
       return Number.isFinite(quantity) && quantity !== 0 ? (quantity > 0 ? '买入' : '卖出') : '';
     }
+    if (column === 'forced') return row.forced ? '是' : '';
     const value = row[column];
     return value !== null && typeof value === 'object' ? JSON.stringify(value) : value;
   }
