@@ -47,7 +47,7 @@ def benchmark_result(manifest, bars, config, progress=None):
         return None
     other = replace(config, symbols=[config.benchmark], benchmark=None, max_leverage="1")
     result = simulate(manifest, bars, other, _RebalancedBenchmark("1"), {"weight": "1"}, progress)
-    # C-112：基准只投 95% 权益、剩下 5% 永久现金；不披露的话“超额收益”会被系统性高估
+    # C-112/113：基准仓位必须在 metadata 里披露；已从固定 95% 改为 100% 目标仓位（整股/手续费自然留少量现金）
     result.setdefault("metadata", {})["benchmark_weight"] = "1"
     result["metadata"]["benchmark_note"] = ("基准按 100% 目标仓位买入并持有；整股取整与手续费会留下少量现金，"
                                             "这部分现金不计收益")
