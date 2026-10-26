@@ -380,3 +380,32 @@ def test_close_research_is_marked_as_research_only(small, config):
     assert meta["execution_price_basis"] == "close", meta
     assert meta["research_warning"] and "收盘价" in meta["research_warning"], meta
     assert meta["point_in_time_prices_verified"] is False, meta
+
+
+def test_futures_roundtrip_and_expiry_realized(small, config):
+    """C-116：期货 realized 记完整往返（含双边费用），到期交割也要进 realized。"""
+    small["securities"]["A"].update(kind="future", multiplier="10", tick="0.1",
+                                    expiry="2024-01-10", initial_margin=".1", maintenance_margin=".05")
+    prices = ["10", "10", "12", "12", "12"]
+    for b, price in zip(small["bars"], prices):
+        b.update(open=price, high=price, low=price, close=price, vwap_value=price, settlement=price)
+
+    def strat(ctx):
+        pos = ctx.positions.get("A", 0)
+        if not ctx.state.get("bought"):
+            ctx.order_shares("A", 10); ctx.state["bought"] = True
+        elif pos > 0 and not ctx.state.get("sold"):
+            ctx.order_shares("A", -pos); ctx.state["sold"] = True
+
+    result = run_small(small, replace(config, max_leverage="5"), SimpleNamespace(on_session=strat))
+    fills = [t for t in result["trades"] if t["symbol"] == "A"]
+    assert len(fills) == 2, fills
+    assert result["metrics"]["win_rate"] == 1.0, result["metrics"]
+
+    # 一直持有到期：到期交割也要留下 realized，不能胜率缺失
+    def hold(ctx):
+        if not ctx.state.get("bought"):
+            ctx.order_shares("A", 10); ctx.state["bought"] = True
+    held = run_small(small, replace(config, max_leverage="5"), SimpleNamespace(on_session=hold))
+    assert any(e["type"] == "contract_expiry" for e in held["ledger"]), held["ledger"]
+    assert held["metrics"]["win_rate"] is not None and held["metrics"]["win_rate"] == 1.0, held["metrics"]

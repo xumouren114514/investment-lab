@@ -13,6 +13,9 @@ class Account:
         self.receivables = []
         self.unsettled = []
         self.futures_basis = {}
+        # C-116：期货开仓均价/已付手续费，用于统计“完整往返”的 realized
+        self.futures_entry = {}
+        self.futures_entry_fee = {}
         self.cost_basis = {}
         self.ledger = []
         self.fees = ZERO

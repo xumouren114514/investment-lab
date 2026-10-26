@@ -612,10 +612,28 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                         basis = account.futures_basis.get(order.symbol, price)
                         if sign > 0:
                             account.futures_basis[order.symbol] = (old_qty * basis + qty * price) / (old_qty + qty)
+                            entry = account.futures_entry.get(order.symbol)
+                            if entry is None or old_qty == 0:
+                                account.futures_entry[order.symbol] = price
+                            else:
+                                account.futures_entry[order.symbol] = (old_qty * entry + qty * price) / (old_qty + qty)
+                            account.futures_entry_fee[order.symbol] = account.futures_entry_fee.get(order.symbol, ZERO) + fee
                         else:
                             pnl = money(qty * multiplier * (price - basis))
                             account.credit(pnl) if pnl >= 0 else account.debit(-pnl)
-                            account.realized.append(float(pnl - fee))
+                            # C-116：realized 记“从开仓到这次平仓”的完整往返（含双边费用），
+                            # 而不是只记当日盯市增量，否则多日持仓的胜率实际是“盈利日占比”
+                            entry = account.futures_entry.get(order.symbol)
+                            entry_fee = account.futures_entry_fee.get(order.symbol, ZERO)
+                            if entry is not None and old_qty > 0:
+                                allocated = entry_fee if qty == old_qty else money(entry_fee * qty / old_qty)
+                                account.realized.append(float(money(qty * multiplier * (price - entry) - fee - allocated)))
+                                account.futures_entry_fee[order.symbol] = entry_fee - allocated
+                                if qty == old_qty:
+                                    account.futures_entry.pop(order.symbol, None)
+                                    account.futures_entry_fee.pop(order.symbol, None)
+                            else:
+                                account.realized.append(float(pnl - fee))
                     elif sign > 0:
                         account.debit(qty * price + fee)
                     else:
@@ -658,6 +676,14 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
         for symbol, qty in list(account.positions.items()):
             sec = securities[symbol]
             if qty and sec.get("kind") == "future" and day >= sec["expiry"]:
+                # C-116：到期现金交割也要进 realized（原来只清仓、胜率直接缺失）
+                entry = account.futures_entry.get(symbol)
+                entry_fee = account.futures_entry_fee.get(symbol, ZERO)
+                if entry is not None:
+                    multiplier = dec(sec.get("multiplier", 1))
+                    account.realized.append(float(money(qty * multiplier * (prices[symbol] - entry) - entry_fee)))
+                account.futures_entry.pop(symbol, None)
+                account.futures_entry_fee.pop(symbol, None)
                 account.positions[symbol] = ZERO
                 account.event(day, "contract_expiry", symbol=symbol, quantity=qty, settlement=prices[symbol])
         equity = account.equity(prices, securities)
