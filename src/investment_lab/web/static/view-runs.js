@@ -39,7 +39,8 @@ function runReturnCells(run) {
     return `<td class="num ${InvestmentLabUI.tone(summary.total_return)}">${pct(summary.total_return)}</td><td class="num">${pct(summary.max_drawdown)}</td>`;
   }
   if (run.kind === 'rolling') {
-    return `<td class="num ${InvestmentLabUI.tone(summary.median)}" title="各起点收益中位数">中位 ${pct(summary.median)}</td><td class="num" title="各起点中最差的收益">最差 ${pct(summary.worst)}</td>`;
+    const drawdown = InvestmentLabUI.finite(summary.worst_drawdown) !== null ? pct(summary.worst_drawdown) : '—';
+    return `<td class="num ${InvestmentLabUI.tone(summary.median)}" title="各起点收益中位数">中位 ${pct(summary.median)}</td><td class="num" title="各窗口最大回撤中的最差值">最差回撤 ${drawdown}</td>`;
   }
   // Holdout figures are shown only on the detail page, where each view is recorded.
   return '<td class="num" colspan="2"><small>打开详情查看</small></td>';
@@ -56,7 +57,7 @@ function runRow(run) {
     + `<td><div class="run-cell">${InvestmentLabUI.seal(run.id, 'small')}<div><a href="#/runs/${encodeURIComponent(run.id)}">${esc(strategyName(request))}</a>`
     + `<small>${esc(Results.KIND_NAMES[run.kind] || run.kind)}，${esc(InvestmentLabUI.formatDateTime(run.created))}，${short}</small></div></div></td>`
     + `<td class="num">${esc(config.start || '—')}<small>${esc(config.end || '')}</small></td>`
-    + `<td>${Results.dataBadge({synthetic: request.synthetic, reference: isReference(request)})}<small>${esc(Results.MODE_NAMES[config.mode] || config.mode || '')}</small></td>`
+    + `<td>${Results.dataBadge({synthetic: request.synthetic, reference: isReference(request), closeResearch: config.mode === 'close_research'})}<small>${esc(Results.MODE_NAMES[config.mode] || config.mode || '')}</small></td>`
     + runReturnCells(run)
     + `<td>${Results.statusBadge(run.status)}${failed ? `<small class="run-error">${esc(run.summary?.message || '失败原因尚未记录，请查看详情。')}</small>` : ''}</td>`
     + `<td><div class="actions"><a class="btn small" href="#/runs/${encodeURIComponent(run.id)}">${failed ? '查看原因' : '查看'}</a>`
@@ -123,7 +124,8 @@ function runFailureAdvice(message, referenceAvailable = false) {
 function detailHeader(id, request, result) {
   const config = request?.config || {};
   const single = request?.kind === 'single' || !request?.kind;
-  const badges = [Results.dataBadge({synthetic: request?.synthetic, reference: isReference(request)}),
+  const badges = [Results.dataBadge({synthetic: request?.synthetic, reference: isReference(request),
+    closeResearch: request?.config?.mode === 'close_research'}),
     `<span class="badge">${esc(Results.MODE_NAMES[config.mode] || config.mode || '')}</span>`,
     request?.holdout_label ? `<span class="badge info">${esc(request.holdout_label)}</span>` : ''].join('');
   const actions = result ? `<button type="button" data-action="reload">载入到研究配置</button>`
@@ -363,7 +365,9 @@ async function showCompare(route) {
   const view = Results.comparison(runs.map(item => {
     const request = item.detail.request, result = item.detail.result;
     return {id: item.id, title: strategyName(request), href: '#/runs/' + encodeURIComponent(item.id), config: request.config,
-      metrics: result.metrics, currency: result.metadata?.currency || '', synthetic: !!request.synthetic, reference: isReference(request),
+      metrics: result.metrics, currency: result.metadata?.currency || '', synthetic: !!request.synthetic,
+      reference: isReference(request), closeResearch: request.config?.mode === 'close_research',
+      rankEligible: result.metadata?.normal_ranking_eligible !== false,
       curve: result.curve};
   }), {skipped, removable: true});
   host.innerHTML = `<div class="detail-head"><div class="detail-title"><div><h2>比较 ${runs.length} 次单次回测</h2><p>时间加权净值按日期叠加，剔除入金与提款影响。</p></div></div>`

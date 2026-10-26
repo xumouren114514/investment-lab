@@ -81,11 +81,16 @@ def rolling(manifest, bars, config, factory, params, interval="month", horizon=6
         if progress:
             progress(completed_work, total_work)
     values = [s["metrics"]["total_return"] for s in samples if s["status"] == "completed"]
+    drawdowns = [s["metrics"]["max_drawdown"] for s in samples if s["status"] == "completed"
+                 and isinstance(s.get("metrics"), dict) and isinstance(s["metrics"].get("max_drawdown"), (int, float))]
     if not values:
         raise ValueError("全部滚动窗口被跳过: " + "; ".join(s.get("reason", "") for s in samples[:4]))
     return {"kind": "rolling", "samples": samples, "summary": {"count": len(values), "skipped": len(samples) - len(values),
             "loss_ratio": sum(v < 0 for v in values) / len(values), "median": float(np.median(values)),
-            "q10": float(np.quantile(values, .1)), "q90": float(np.quantile(values, .9)), "best": max(values), "worst": min(values)},
+            "q10": float(np.quantile(values, .1)), "q90": float(np.quantile(values, .9)), "best": max(values), "worst": min(values),
+            # C-108：列表「最大回撤」列原来装的是“最差窗口收益”，不是回撤；这里补真实回撤聚合
+            "worst_drawdown": min(drawdowns) if drawdowns else None,
+            "median_drawdown": float(np.median(drawdowns)) if drawdowns else None},
             "metadata": {**research_metadata(config), "interval": interval, "horizon_sessions": horizon, "end_mode": end_mode, "overlap_warning": "重叠窗口并非独立样本；不是样本外验证"}}
 
 

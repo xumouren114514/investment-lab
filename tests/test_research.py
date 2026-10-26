@@ -20,6 +20,9 @@ def test_rolling_independent_state_and_account(small, config):
     assert result["summary"]["count"] == 3
     assert result["summary"]["skipped"] == 2
     assert all(s["result"]["metrics"]["trades"] == 1 for s in result["samples"] if s["status"] == "completed")
+    # C-108：summary 必须给出真实回撤聚合，而不是拿“最差收益”冒充回撤
+    dd = [s["metrics"]["max_drawdown"] for s in result["samples"] if s["status"] == "completed"]
+    assert result["summary"]["worst_drawdown"] == min(dd)
     assert progress[-1][0] == progress[-1][1] == 9
     assert all(done <= next_done and total == 9 for (done, total), (next_done, _) in zip(progress, progress[1:]))
 

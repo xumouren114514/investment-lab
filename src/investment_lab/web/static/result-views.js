@@ -41,9 +41,11 @@
     return `<span class="badge ${tone}">${esc(STATUS_NAMES[status] || status)}</span>`;
   }
 
-  function dataBadge({synthetic, reference}) {
+  function dataBadge({synthetic, reference, closeResearch}) {
     if (synthetic) return '<span class="badge demo">合成演示</span>';
     if (reference) return '<span class="badge demo">参考研究</span>';
+    // C-109：收盘价成交的研究模式不可与真实可成交回测比较（引擎已写 normal_ranking_eligible=false）
+    if (closeResearch) return '<span class="badge demo">收盘价研究（不可比）</span>';
     return '<span class="badge">真实来源</span>';
   }
 
@@ -185,7 +187,8 @@
   function comparison(items, {skipped = [], removable = false} = {}) {
     const currencies = new Set(items.map(item => item.currency || ''));
     const periods = new Set(items.map(item => `${item.config?.start}/${item.config?.end}`));
-    const unranked = items.some(item => item.synthetic || item.reference);
+    // C-109：以引擎的 normal_ranking_eligible 为准；旧结果没有该字段时退回合成/参考判断
+    const unranked = items.some(item => item.synthetic || item.reference || item.rankEligible === false);
     const best = key => {
       if (unranked || items.length < 2) return null;
       const values = items.map(item => UI.finite(item.metrics?.[key])).filter(value => value !== null);
@@ -197,7 +200,8 @@
     const warnings = [
       periods.size > 1 ? '各运行的区间不同，曲线按日期对齐显示；比较前先核对时期与资金流。' : '',
       currencies.size > 1 ? '这些运行使用不同币种：权益不相加，收益率比较也需考虑汇率。' : '',
-      unranked ? '包含合成演示或参考历史价格研究：只作流程或参考比较，不标记最优。' : '',
+      unranked ? '包含合成演示、参考历史价格或收盘价研究：只作流程或参考比较，不标记最优。' : '',
+      items.some(item => item.closeResearch) ? '收盘价研究按收盘价成交，不是真实可成交回测；其收益与回撤不能与严格执行结果直接比较。' : '',
       ...skipped.map(item => `运行 ${String(item.id).slice(0, 10)} 未列入：${item.problem || '没有可比较的结果'}。`),
     ].filter(Boolean);
     const link = item => item.href ? `<a href="${esc(item.href)}">${esc(item.title)}</a>`
