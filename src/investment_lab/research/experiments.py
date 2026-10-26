@@ -117,6 +117,8 @@ def rolling(manifest, bars, config, factory, params, interval="month", horizon=6
     if not values:
         raise ValueError("全部滚动窗口被跳过: " + "; ".join(s.get("reason", "") for s in samples[:4]))
     lengths = [s["sessions"] for s in samples if s["status"] == "completed" and isinstance(s.get("sessions"), int)]
+    relatives = [s["relative_return"] for s in samples
+                 if s["status"] == "completed" and isinstance(s.get("relative_return"), (int, float))]
     return {"kind": "rolling", "samples": samples, "summary": {"count": len(values), "skipped": len(samples) - len(values),
             "window_sessions_min": min(lengths) if lengths else None,
             "window_sessions_max": max(lengths) if lengths else None,
@@ -124,7 +126,9 @@ def rolling(manifest, bars, config, factory, params, interval="month", horizon=6
             "q10": float(np.quantile(values, .1)), "q90": float(np.quantile(values, .9)), "best": max(values), "worst": min(values),
             # C-108：列表「最大回撤」列原来装的是“最差窗口收益”，不是回撤；这里补真实回撤聚合
             "worst_drawdown": min(drawdowns) if drawdowns else None,
-            "median_drawdown": float(np.median(drawdowns)) if drawdowns else None},
+            "median_drawdown": float(np.median(drawdowns)) if drawdowns else None,
+            # C-120：SPEC 要求的“相对基准表现”在滚动里也要能看到（基准与各窗口同资金流）
+            "relative_median": float(np.median(relatives)) if relatives else None},
             "metadata": {**research_metadata(config), "interval": interval,
                          # C-110：common_end 时窗口长度不等，horizon 并不生效，不能谎报成固定 horizon
                          "horizon_sessions": horizon if end_mode == "fixed_length" else None,

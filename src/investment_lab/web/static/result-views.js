@@ -132,6 +132,7 @@
       + `<p class="help">${esc(experiments.metadata?.overlap_warning || '')}。中位数 ${pct(summary.median)}，10% / 90% 分位数 ${pct(summary.q10)} / ${pct(summary.q90)}。`
       + (UI.finite(summary.window_sessions_min) !== null && summary.window_sessions_min !== summary.window_sessions_max
         ? `窗口长度 ${summary.window_sessions_min}–${summary.window_sessions_max} 个交易日不等，分位仅供参考。` : '')
+      + (UI.finite(summary.relative_median) !== null ? `相对基准中位数 ${pct(summary.relative_median)}（基准与各窗口同资金流）。` : '')
       + `</p>`
       + `<div class="heatmap">${(experiments.samples || []).map((sample, index) => {
         const ok = sample.status === 'completed';

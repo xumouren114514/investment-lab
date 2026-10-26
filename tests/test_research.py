@@ -87,3 +87,12 @@ def test_benchmark_reinvests_cash_flows(small, config):
     buys = [t for t in bench["trades"] if float(t["quantity"]) > 0]
     assert len(buys) >= 2, buys
     assert sum(float(t["quantity"]) for t in buys) > 99, buys
+
+
+def test_rolling_relative_median_is_reported(small, config):
+    """C-120：滚动摘要要给出相对基准中位数（SPEC 要求）。"""
+    from dataclasses import replace
+    manifest = {k: v for k, v in small.items() if k != "bars"}
+    cfg = replace(config, benchmark="A")
+    result = rolling(manifest, small["bars"], cfg, lambda: SimpleNamespace(on_session=lambda ctx: None), {}, "day", 3)
+    assert result["summary"]["relative_median"] is not None
