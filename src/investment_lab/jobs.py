@@ -190,6 +190,11 @@ def execute_run(store, run_id):
             result = simulate(manifest, bars, config, factory(), params, scaled_progress if progress else None)
             benchmark_progress = lambda done, _total: progress(session_count + done, total_work)
             result["benchmark"] = benchmark_result(manifest, bars, config, benchmark_progress if progress and config.benchmark else None)
+            # C-115：单次运行也给出“相对基准”，否则 SPEC 要求的超额只有滚动样本里才算
+            if result["benchmark"] is not None:
+                result["relative_return"] = (result["metrics"]["total_return"]
+                                             - result["benchmark"]["metrics"]["total_return"])
+                result["metrics"]["relative_return"] = result["relative_return"]
             summary = result["metrics"]
         elif request["kind"] == "rolling":
             result = rolling(manifest, bars, config, factory, params, progress=progress, **request.get("research", {}))

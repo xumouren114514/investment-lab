@@ -130,6 +130,10 @@ def holdout(manifest, bars, config, factory, params, test_start, gap_sessions=0,
         benchmark_offset = completed_work
         benchmark_progress = (lambda done, _total, base=benchmark_offset: progress(base + done, total_work)) if progress and config.benchmark else None
         benchmark = benchmark_result(manifest, bars, subset, benchmark_progress)
+        if benchmark is not None:
+            # C-115：每个留出段也给出相对基准，便于逐段对照
+            result.setdefault("metrics", {})["relative_return"] = (
+                result["metrics"]["total_return"] - benchmark["metrics"]["total_return"])
         if config.benchmark:
             completed_work += session_count
         outputs[label] = {"start": start, "end": end, "result": result, "benchmark": benchmark}

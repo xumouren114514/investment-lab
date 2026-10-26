@@ -237,6 +237,8 @@ def test_run_export_progress_and_status_do_not_count_holdout_views(tmp_path, sma
         assert views() == before + 1
     # The section benchmark is shown with the section result, with the same period and cash flows.
     assert detail["result"]["benchmark"]["metrics"]["total_return"] is not None
+    assert detail["result"]["metrics"]["relative_return"] == round(
+        detail["result"]["metrics"]["total_return"] - detail["result"]["benchmark"]["metrics"]["total_return"], 6)
     assert detail["result"]["benchmark"]["curve"]
 
 
