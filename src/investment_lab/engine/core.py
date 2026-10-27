@@ -43,13 +43,23 @@ def _touched_limit(order, security: dict, bar: dict, preclose=None) -> bool:
     preclose × 板块幅度现算（见 price_limit.py），算不出来就按"未触发"处理——
     不假装有守卫，也不因缺数据把订单全拒。
     """
+    return _limit_verdict(order, security, bar, preclose)[0]
+
+
+def _limit_verdict(order, security: dict, bar: dict, preclose=None) -> tuple[bool, bool]:
+    """返回 (是否触及价限, 价限是否真的算得出来)。
+
+    第二个值是为了让「没应用守卫」可见（方案要求的 `limit_guard_skipped` 计数）：
+    缺 preclose、非股票（ETF/基金/可转债/期货）、未知板块时算不出来，返回 (False, False)，
+    调用方按「未触发」处理但会计数——**不假装有守卫**。
+    """
     lim = limits_for_bar(security, bar, preclose)
     if lim is None:
-        return False
+        return False, False
     up, down = lim
     if order.remaining > 0:
-        return bar.get("high") is not None and dec(bar["high"]) >= up
-    return bar.get("low") is not None and dec(bar["low"]) <= down
+        return (bar.get("high") is not None and dec(bar["high"]) >= up), True
+    return (bar.get("low") is not None and dec(bar["low"]) <= down), True
 
 
 def is_shanghai_star_stock(security, symbol):
@@ -493,6 +503,11 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
     max_leverage = dec(config.max_leverage)
     state, next_id = {}, 1
     bankrupt = False
+    # 价限守卫是否真的算得出来（见 _limit_verdict）：必须是**整轮回测**的累计，
+    # 不能放在日循环里——否则每天清零，metadata 只剩最后一天的值（2026-10-28 踩过）。
+    limit_guard_applied = 0
+    limit_guard_skipped = 0
+
     for session_index, day in enumerate(sessions):
         if config.rules:
             rule_cache.clear()
@@ -535,10 +550,18 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
             failure = None
             if bar is None or bar.get("status", "trading") != "trading" or dec(bar["volume"]) <= 0:
                 failure = "停牌、非挂牌日期或无成交量"
-            elif _touched_limit(order, sec, bar, _preclose_for(order.symbol, bar, prices)):
-                failure = "触及价格限制，日线保守拒绝成交"
-            elif sec.get("kind") == "future" and day >= sec["expiry"] and order.remaining > 0:
-                failure = "到期日不新开仓"
+            else:
+                # 价限守卫是否真的算得出来，要能看见（见 _limit_verdict）
+                touched, guard_applied = _limit_verdict(
+                    order, sec, bar, _preclose_for(order.symbol, bar, prices))
+                if guard_applied:
+                    limit_guard_applied += 1
+                else:
+                    limit_guard_skipped += 1
+                if touched:
+                    failure = "触及价格限制，日线保守拒绝成交"
+                elif sec.get("kind") == "future" and day >= sec["expiry"] and order.remaining > 0:
+                    failure = "到期日不新开仓"
             if failure is None:
                 rule = trading_rule(order.symbol, day)
                 lot = dec(rule["lot"])
@@ -768,6 +791,10 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                          "cash_flow_schedule": deepcopy(config.cash_flows), "cash_flows": cash_flows,
                          "monthly_deposit_rule": MONTHLY_RULE if "monthly" in config.cash_flows else None,
                          "reference_only": reference,
+                         # 价限守卫的可见性（2026-10-28）：计的是「订单-交易日尝试」次数；
+                         # skipped = 算不出涨跌停（缺 preclose / 非股票 / 未知板块），此时按未触发处理
+                         "limit_guard_applied": limit_guard_applied,
+                         "limit_guard_skipped": limit_guard_skipped,
                          "research_warning": (REFERENCE_WARNING if reference else
                                               ("以收盘价成交，不是真实可成交回测；仅供研究" if config.mode == "close_research" else None)),
                          "corporate_action_policy": "忽略拆股及现金分红；仅价格收益，不含股息" if reference else "事件分别记账",
