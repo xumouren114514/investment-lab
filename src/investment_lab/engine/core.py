@@ -13,7 +13,7 @@ from investment_lab.common import dec, digest, encoded, money
 from .account import Account, ZERO
 from .models import Config, Order
 from .cash_flows import MONTHLY_RULE, resolve_cash_flows
-from .price_limit import limits_for_bar
+from .price_limit import guard_report, limits_for_bar
 from .reference import REFERENCE_MODE, REFERENCE_BASIS, REFERENCE_WARNING, reference_available
 
 STAR_BOARD_RULE_NOT_IMPLEMENTED = "科创板买入最低数量和增量规则待实现"
@@ -795,6 +795,9 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                          # skipped = 算不出涨跌停（缺 preclose / 非股票 / 未知板块），此时按未触发处理
                          "limit_guard_applied": limit_guard_applied,
                          "limit_guard_skipped": limit_guard_skipped,
+                         # C-142（§14 第 1 条）：两个数字不够——要一句话说清"这段成交有没有价限保护"
+                         "price_limit_guard": guard_report(limit_guard_applied, limit_guard_skipped,
+                                                           manifest.get("source")),
                          "research_warning": (REFERENCE_WARNING if reference else
                                               ("以收盘价成交，不是真实可成交回测；仅供研究" if config.mode == "close_research" else None)),
                          "corporate_action_policy": "忽略拆股及现金分红；仅价格收益，不含股息" if reference else "事件分别记账",

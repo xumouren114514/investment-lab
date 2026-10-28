@@ -98,3 +98,33 @@ def limits_for_bar(security: dict, bar: dict,
         return ((b * (1 + r)).quantize(CENT, rounding=ROUND_HALF_UP),
                 (b * (1 - r)).quantize(CENT, rounding=ROUND_HALF_UP))
     return limits_for(symbol, base, st)
+
+
+def guard_report(applied, skipped, source=None):
+    """C-142（§14 第 1 条）：把「价限守卫有没有真的生效」变成一句能被读的话。
+
+    判决来自**实际发生的订单-交易日尝试**，不是数据源的自我声明：
+      · not_used     —— 本次没有任何成交尝试，谈不上守卫；
+      · unavailable  —— 全部尝试都算不出涨跌停（缺 preclose / 非股票 / 未知板块），这些成交没有价限保护；
+      · partial      —— 一部分算得出、一部分算不出；
+      · applied      —— 全部尝试都有价限判定。
+    """
+    if isinstance(source, dict):
+        provider = source.get("provider") or source.get("name") or source.get("source") or "unknown"
+    else:
+        provider = str(source or "unknown")
+    applied, skipped = int(applied or 0), int(skipped or 0)
+    total = applied + skipped
+    if total == 0:
+        status = "not_used"
+        note = "本次没有订单-交易日尝试，谈不上价限守卫"
+    elif applied == 0:
+        status = "unavailable"
+        note = "所有成交尝试都算不出涨跌停（缺 preclose / 非股票 / 未知板块），这些成交没有价限保护"
+    elif skipped == 0:
+        status = "applied"
+        note = "全部成交尝试都有价限判定"
+    else:
+        status = "partial"
+        note = f"{skipped}/{total} 次成交尝试算不出涨跌停，这部分没有价限保护"
+    return {"status": status, "applied": applied, "skipped": skipped, "source": provider, "note": note}
