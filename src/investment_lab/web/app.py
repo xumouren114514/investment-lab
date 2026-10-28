@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from investment_lab import __version__, SCHEMA_VERSION
 from investment_lab.common import PROJECT, atomic_write, digest, encoded, now, read_json, within
 from investment_lab.data.store import Store
-from investment_lab.data.validation import coverage
+from investment_lab.data.validation import coverage, invariants
 from investment_lab.data.universe import universe, update_universe
 from investment_lab.jobs import JobManager, create_run
 from investment_lab.engine.models import Config
@@ -295,7 +295,9 @@ def create_app(root=None):
     @app.get("/api/coverage/{snapshot}")
     def get_coverage(snapshot: str):
         manifest, bars = store.load(snapshot)
-        return {"snapshot": snapshot, "source": manifest["source"], "items": coverage(manifest, bars)}
+        # C-141（§14 第 5 条）：把数据质量不变量一并给出——纯观测，不参与任何计算。
+        return {"snapshot": snapshot, "source": manifest["source"], "items": coverage(manifest, bars),
+                "invariants": invariants(manifest, bars)}
 
     @app.get("/api/open-resources")
     def open_resources():

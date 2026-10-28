@@ -81,3 +81,81 @@ def coverage(manifest, bars):
                        "missing_sessions": [d for d in expected if d not in dates],
                        "actions_verified": sec.get("actions_verified", False), "synthetic": manifest["synthetic"]})
     return result
+
+
+def invariants(manifest, bars, jump_threshold=0.25, max_examples=20):
+    """C-141（§14 第 5 条）：数据质量不变量 + 覆盖率。**纯观测，不改任何计算结果。**
+
+    三条不变量，每条都报 checked / uncovered / violations：
+      A. 停牌日（status=suspended）的成交量与成交额必须为 0；
+      B. preclose 必须等于上一根 bar 的收盘价——**当天有公司行动时豁免**
+         （除权参考价本来就不等于昨收，严格比对会制造假警报）；
+      C. 单日价格跳变超过 jump_threshold（默认 25%）时，必须能由当天的公司行动解释，
+         否则记为"无解释跳变"。
+
+    `uncovered` 是"**没数据可查**"（比如这根 bar 没有 preclose 字段），不是"查了没问题"——
+    这正是这条要防的事：没查过的东西不能看起来像检查过。
+    """
+    by_symbol = {}
+    for bar in bars:
+        by_symbol.setdefault(bar["symbol"], []).append(bar)
+    for rows in by_symbol.values():
+        rows.sort(key=lambda b: b["date"])
+    actions = {(a.get("symbol"), a.get("date")): a for a in manifest.get("actions", [])}
+
+    suspended = {"checked": 0, "uncovered": 0, "violations": []}
+    preclose = {"checked": 0, "uncovered": 0, "violations": []}
+    jumps = {"checked": 0, "uncovered": 0, "violations": [], "explained": 0}
+
+    for bar in bars:
+        status = bar.get("status")
+        if status == "suspended":
+            suspended["checked"] += 1
+            volume = dec(bar.get("volume") or 0)
+            amount = dec(bar.get("amount") or 0)
+            if volume != 0 or amount != 0:
+                suspended["violations"].append(
+                    f"{bar['symbol']}/{bar['date']} 停牌但量/额非零（vol={volume}, amount={amount}）")
+        elif status != "trading":
+            suspended["uncovered"] += 1   # 没有 status 字段，无从判断当天是否停牌
+
+    for symbol, rows in by_symbol.items():
+        for prev, cur in zip(rows, rows[1:]):
+            prev_close = dec(prev.get("close") or 0)
+            if cur.get("preclose") is None:
+                preclose["uncovered"] += 1
+            else:
+                preclose["checked"] += 1
+                if (symbol, cur["date"]) in actions:
+                    pass   # 除权日的参考价本来就不等于昨收
+                elif prev_close > 0:
+                    diff = abs(dec(cur["preclose"]) - prev_close) / prev_close
+                    if diff > 1e-6:
+                        preclose["violations"].append(
+                            f"{symbol}/{cur['date']} preclose={cur['preclose']} ≠ 前收 {prev_close}（差 {diff:.4%}）")
+
+            jumps["checked"] += 1
+            if prev_close <= 0:
+                continue
+            change = dec(cur.get("close") or 0) / prev_close - 1
+            if abs(change) <= dec(str(jump_threshold)):
+                continue
+            if (symbol, cur["date"]) in actions:
+                jumps["explained"] += 1
+            else:
+                jumps["violations"].append(
+                    f"{symbol}/{cur['date']} 单日 {change:+.1%} 且当天无公司行动")
+
+    def block(item):
+        total = item["checked"] + item["uncovered"]
+        return {"checked": item["checked"], "uncovered": item["uncovered"],
+                "coverage": round(item["checked"] / total, 4) if total else None,
+                "violation_count": len(item["violations"]),
+                "violations": item["violations"][:max_examples],
+                **({"explained": item["explained"]} if "explained" in item else {})}
+
+    blocks = {"suspended_zero_volume": block(suspended),
+              "preclose_consistency": block(preclose),
+              "unexplained_jumps": block(jumps)}
+    total = sum(b["violation_count"] for b in blocks.values())
+    return {**blocks, "summary": {"violations": total, "ok": total == 0}}
