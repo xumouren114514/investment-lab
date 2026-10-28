@@ -493,12 +493,38 @@ def _preflight(manifest, bars, config):
     return sessions
 
 
+def _warmup_report(bars, symbols, first_session):
+    """C-146（§14 第 2 条）：预热窗口里有多少"携转假 bar"。
+
+    携转 = 当天停牌、价格抄前一天（或零成交且收盘与前一根相同）。这类 bar 会让 MA/波动率/动量
+    在预热段看起来"很平稳"，是审计里说的「85% 是平坦伪观测」的来源。
+    **只统计、不参与计算**——按用户裁决，过滤会改所有历史指标的数值。
+    """
+    out = {}
+    for symbol in symbols:
+        warm = list(bars.symbol(symbol).before(first_session))
+        flat = 0
+        prev_close = None
+        for bar in warm:
+            close = dec(bar.get("close") or 0)
+            if bar.get("status") == "suspended":
+                flat += 1
+            elif prev_close is not None and close == prev_close and dec(bar.get("volume") or 0) == 0:
+                flat += 1
+            prev_close = close
+        out[symbol] = {"bars": len(warm), "flat": flat,
+                       "ratio": round(flat / len(warm), 4) if warm else None}
+    return out
+
+
 def simulate(manifest, bars, config: Config, strategy, params=None, progress=None):
     bars = prepare_bars(bars)
     sessions = _preflight(manifest, bars, config)
     cash_flows = resolve_cash_flows(config.cash_flows, sessions, config.start, config.end)
     reference = config.mode == REFERENCE_MODE
     securities = manifest["securities"]
+    # C-146：预热窗口的携转假 bar 只统计、不参与计算（见 _warmup_report 的说明）
+    warmup_bars = _warmup_report(bars, config.symbols, sessions[0]) if sessions else {}
     symbol_bars = {s: bars.symbol(s) for s in config.symbols}
     account = Account(config.initial_cash)
     pending, trades, orders, curve, notes = [], [], [], [], []
@@ -853,6 +879,11 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                          # C-145（§14 第 3 条）：交易回测走 fail-closed；研究模式放行但把未核实的标的列出来
                          "corporate_action_gate": ("research_mode" if (reference or config.mode == "close_research")
                                                    else "fail_closed"),
+                         # C-146（§14 第 2 条）：预热窗口里有多少携转假 bar（只标注，不过滤）
+                         "warmup_bars": warmup_bars,
+                         "warmup_flat_summary": ", ".join(
+                             f"{s}: {v['flat']}/{v['bars']} ({(v['ratio'] or 0):.0%})"
+                             for s, v in warmup_bars.items()) or None,
                          "unadjusted_symbols": sorted(s for s in config.symbols
                                                       if not securities[s].get("actions_verified")),
                          "reference_units": "调整后参考份额，不是历史实际股数" if reference else None,
