@@ -365,6 +365,48 @@ def rule_for(config, security, symbol, day):
     return rule
 
 
+CORPORATE_ACTION_JUMP = "0.25"   # C-145：单日涨跌超过 25% 视为"疑似公司行动"
+
+
+def _corporate_action_gate(manifest, bars, config):
+    """C-145（§14 第 3 条）：交易回测的 fail-closed。
+
+    没有核实的公司行动 = 价格可能没复权 = 回测会凭空多出/少掉收益。**宁可拒绝跑。**
+    但只在**有证据**时拒，不搞"一律拒绝"：
+      ① 区间内该标的有公司行动记录；
+      ② 区间内出现 >25% 的无法解释跳变（拆股/大比例分红的典型形态）。
+    """
+    securities = manifest["securities"]
+    actions = {}
+    for item in manifest.get("actions", []):
+        actions.setdefault(item.get("symbol"), []).append(item)
+    problems = {}
+    for symbol in config.symbols:
+        security = securities[symbol]
+        if security.get("actions_verified"):
+            continue
+        in_window = [a for a in actions.get(symbol, []) if config.start <= a.get("date", "") <= config.end]
+        if in_window:
+            first = in_window[0]
+            problems[symbol] = (f"区间内有 {len(in_window)} 条未核实的公司行动"
+                                f"（{first.get('type')} {first.get('date')}）")
+            continue
+        rows = sorted((b for b in bars if b["symbol"] == symbol and config.start <= b["date"] <= config.end),
+                      key=lambda b: b["date"])
+        jumps = []
+        for prev, cur in zip(rows, rows[1:]):
+            prev_close = dec(prev.get("close") or 0)
+            if prev_close <= 0:
+                continue
+            change = dec(cur.get("close") or 0) / prev_close - 1
+            if abs(change) > dec(CORPORATE_ACTION_JUMP):
+                jumps.append(f"{cur['date']} {change:+.0%}")
+        if jumps:
+            problems[symbol] = (f"区间内有 {len(jumps)} 次无法解释的 >25% 跳变（疑似拆股/分红未记录）："
+                                f"{'、'.join(jumps[:3])}")
+    return problems
+
+
 def preflight(manifest, bars, config):
     return _preflight(manifest, prepare_bars(bars), config)
 
@@ -387,6 +429,13 @@ def _preflight(manifest, bars, config):
                         raise ValueError(f"{bar['symbol']}/{bar['date']}: 参考价格口径混合或未知，不能自动拼接")
                     if dec(bar["close"]) <= 0 or dec(bar["volume"]) < 0:
                         raise ValueError("参考价格或成交量无效")
+    if not reference and config.mode != "close_research":
+        problems = _corporate_action_gate(manifest, bars, config)
+        if problems:
+            detail = "；".join(f"{symbol}：{why}" for symbol, why in problems.items())
+            raise ValueError(
+                f"拒绝交易回测：公司行动未核实且区间内有证据（{detail}）。"
+                "价格可能未复权，回测收益会失真。请补齐公司行动后再跑，或改用 close_research 研究模式（结果会标注）")
     selected = [securities[s] for s in config.symbols]
     if len({s["market"] for s in selected}) != 1 or len({s["currency"] for s in selected}) != 1:
         raise ValueError("每次回测仅允许一个市场和一种币种")
@@ -801,6 +850,11 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                          "research_warning": (REFERENCE_WARNING if reference else
                                               ("以收盘价成交，不是真实可成交回测；仅供研究" if config.mode == "close_research" else None)),
                          "corporate_action_policy": "忽略拆股及现金分红；仅价格收益，不含股息" if reference else "事件分别记账",
+                         # C-145（§14 第 3 条）：交易回测走 fail-closed；研究模式放行但把未核实的标的列出来
+                         "corporate_action_gate": ("research_mode" if (reference or config.mode == "close_research")
+                                                   else "fail_closed"),
+                         "unadjusted_symbols": sorted(s for s in config.symbols
+                                                      if not securities[s].get("actions_verified")),
                          "reference_units": "调整后参考份额，不是历史实际股数" if reference else None,
                          "point_in_time_prices_verified": (False if (reference or config.mode == "close_research") else None),
                          "currency": securities[config.symbols[0]]["currency"], "assumptions": config.assumptions,
