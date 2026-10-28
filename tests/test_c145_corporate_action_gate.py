@@ -52,6 +52,22 @@ def test_verified_actions_pass(small, config):
     assert trading(manifest, payload["bars"], config)
 
 
+def test_explicit_assumption_bypasses_evidence_gate(small, config):
+    """已经存在的硬门禁带 `allow_unverified_actions` 逃生阀；证据化门禁必须尊重它，不能比原来更严。"""
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from investment_lab.engine.core import simulate
+
+    payload = unverified(small)
+    payload["actions"] = [{"symbol": "A", "date": "2024-01-08", "type": "split", "ratio": "2"}]
+    manifest = {k: v for k, v in payload.items() if k != "bars"}
+    cfg = replace(config, allow_unverified_actions=True)
+    assert trading(manifest, payload["bars"], cfg)      # 显式选择研究假设 → 放行
+    result = simulate(manifest, payload["bars"], cfg, SimpleNamespace(on_session=lambda ctx: None))
+    assert result["metadata"]["corporate_action_gate"] == "explicit_assumption"
+
+
 def test_research_mode_is_allowed_and_marked(small, config):
     from dataclasses import replace
     from investment_lab.engine.core import simulate

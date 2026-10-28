@@ -429,7 +429,10 @@ def _preflight(manifest, bars, config):
                         raise ValueError(f"{bar['symbol']}/{bar['date']}: 参考价格口径混合或未知，不能自动拼接")
                     if dec(bar["close"]) <= 0 or dec(bar["volume"]) < 0:
                         raise ValueError("参考价格或成交量无效")
-    if not reference and config.mode != "close_research":
+    # C-145 修正：已有硬门禁（见下面 `actions_verified` 那条）带一个显式逃生阀
+    # `allow_unverified_actions`；这里的证据化门禁必须尊重它，否则会比原来更严、
+    # 让"用户明确选择研究假设"这条路失效。
+    if not reference and config.mode != "close_research" and not config.allow_unverified_actions:
         problems = _corporate_action_gate(manifest, bars, config)
         if problems:
             detail = "；".join(f"{symbol}：{why}" for symbol, why in problems.items())
@@ -877,8 +880,10 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                                               ("以收盘价成交，不是真实可成交回测；仅供研究" if config.mode == "close_research" else None)),
                          "corporate_action_policy": "忽略拆股及现金分红；仅价格收益，不含股息" if reference else "事件分别记账",
                          # C-145（§14 第 3 条）：交易回测走 fail-closed；研究模式放行但把未核实的标的列出来
-                         "corporate_action_gate": ("research_mode" if (reference or config.mode == "close_research")
-                                                   else "fail_closed"),
+                         "corporate_action_gate": (
+                             "research_mode" if (reference or config.mode == "close_research")
+                             else "explicit_assumption" if config.allow_unverified_actions
+                             else "fail_closed"),
                          # C-146（§14 第 2 条）：预热窗口里有多少携转假 bar（只标注，不过滤）
                          "warmup_bars": warmup_bars,
                          "warmup_flat_summary": ", ".join(
