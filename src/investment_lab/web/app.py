@@ -297,7 +297,9 @@ def create_app(root=None):
         manifest, bars = store.load(snapshot)
         # C-141（§14 第 5 条）：把数据质量不变量一并给出——纯观测，不参与任何计算。
         return {"snapshot": snapshot, "source": manifest["source"], "items": coverage(manifest, bars),
-                "invariants": invariants(manifest, bars)}
+                "invariants": invariants(manifest, bars),
+                # C-144：这是保守近似（按交易日收盘后），不是真实可获得时刻
+                "available_at_basis": manifest.get("available_at_basis", "trade_date")}
 
     @app.get("/api/open-resources")
     def open_resources():

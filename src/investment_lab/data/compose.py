@@ -24,8 +24,23 @@ def compose_portable_manifests(parents):
     snapshots = [snapshot for snapshot, _ in parents]
     if len(set(snapshots)) != len(snapshots):
         raise ValueError("数据快照必须是非重复的快照ID")
+    # C-143（§14 第 6 条）：**单父组合也要过同一套最低校验**。
+    # 原来这里直接 return，一份只有 1 个交易日的快照会被当作"组合"放行，
+    # 缺市场/币种/时区的标的也能溜过去，直到回测阶段才炸。
+    for _snapshot, _manifest in parents:
+        if not _manifest.get("sessions") or not _manifest.get("securities"):
+            raise ValueError(f"{_manifest['name']}：快照没有交易日历或标的")
+        for _symbol, _security in _manifest["securities"].items():
+            if not all(_security.get(k) for k in ("market", "currency", "timezone")):
+                raise ValueError(f"{_symbol}：缺少市场、币种或时区")
     if len(parents) == 1:
-        return parents[0][0], parents[0][1]
+        _snapshot, _manifest = parents[0]
+        previous = _manifest.get("composition", {})
+        _start = previous.get("start", min(_manifest["sessions"]))
+        _end = previous.get("end", max(_manifest["sessions"]))
+        if len([d for d in _manifest["sessions"] if _start <= d <= _end]) < 2:
+            raise ValueError("所选快照在可用区间内不足两个交易日，无法回测")
+        return _snapshot, _manifest
     if len({m["synthetic"] for _, m in parents}) != 1:
         raise ValueError("合成演示与真实来源不能用于同一次回测，请取消其中一类")
 
@@ -72,6 +87,7 @@ def compose_portable_manifests(parents):
         "partitions": sorted(partitions, key=lambda p: (p["symbol"], p["year"], p["hash"])),
         "actions": sorted(actions, key=encoded), "sessions": sorted(sessions), "source": source,
         "synthetic": parents[0][1]["synthetic"], "raw": None,
+        "available_at_basis": parents[0][1].get("available_at_basis", "trade_date"),   # C-144
         "composition": {"version": 1, "start": start, "end": end,
                         "calendar_rule": "所选日历取并集，保留缺口；运行区间不得超出任一来源覆盖范围",
                         "parents": [{"snapshot": s, "name": m["name"]} for s, m in parents]}

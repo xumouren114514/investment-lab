@@ -87,6 +87,9 @@ class Store:
             partitions = [{"symbol": key[0], "year": key[1], "hash": self.put_object("market", values), "count": len(values)} for key, values in sorted(groups.items())]
             manifest = {"schema": 1, "name": name, "securities": securities, "partitions": partitions,
                         "actions": actions or [], "sessions": sorted(set(sessions or [])), "source": source or {},
+                        # C-144（§14 第 4 条）：available_at 是按**交易日收盘后**推的保守近似，
+                        # 不是真实可获得时刻（没有那种数据源）。写进 manifest，让下游看得见这个前提。
+                        "available_at_basis": "trade_date",
                         "synthetic": synthetic, "raw": self.put_object("raw", raw) if raw is not None else None}
             snapshot = digest(manifest)
             atomic_write(self.root / "manifests" / (snapshot + ".json"), manifest)
