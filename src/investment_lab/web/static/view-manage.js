@@ -38,7 +38,27 @@ $('dataset-cards').addEventListener('click', event => {
       + report.items.map(item => `<tr><td>${esc(item.name)}<small>${esc(item.symbol)}，${esc(item.currency)}</small></td><td class="num">${esc(item.first)}<small>${esc(item.last)}</small></td><td class="num">${num(item.rows, 0)}</td>`
         + `<td class="num">${num(item.strict_vwap_rows, 0)} / ${num(item.rows, 0)}<small>候选均价 ${num(item.candidate_vwap_rows || 0, 0)}，停牌 ${num(item.suspended_rows || 0, 0)}</small><small>${item.synthetic ? '合成样本验证口径' : '需逐个标的核实'}</small></td>`
         + `<td>${item.missing_sessions.length} 个日期缺口<small>公司行动：${item.actions_verified ? '已标记验证' : '未验证'}，已导入现金事件 ${num(item.cash_action_count || 0, 0)}</small><small>${esc(item.execution_blocked || '')}</small></td></tr>`).join('')
-      + `</tbody></table></div><details><summary>来源与缺口详情</summary><pre>${esc(JSON.stringify(report, null, 2))}</pre></details></section></div>`;
+      + `</tbody></table></div>`
+      // C-141：不变量与覆盖率——uncovered 是"没数据可查"，不是"查过没问题"，所以要单列
+      + (() => {
+        const inv = report.invariants;
+        if (!inv) return '';
+        const row = (label, b) => `<tr><td>${label}</td><td class="num">${num(b.checked, 0)}</td>`
+          + `<td class="num">${num(b.uncovered, 0)}</td>`
+          + `<td class="num">${b.coverage === null ? '—' : (b.coverage * 100).toFixed(0) + '%'}</td>`
+          + `<td class="num">${num(b.violation_count, 0)}</td></tr>`;
+        const samples = ['suspended_zero_volume', 'preclose_consistency', 'unexplained_jumps']
+          .flatMap(k => (inv[k].violations || []).slice(0, 1).map(v => `<li>${esc(v)}</li>`));
+        return `<div class="table-wrap"><table><caption>数据质量不变量（未覆盖 = 没数据可查，不等于通过）</caption>`
+          + '<thead><tr><th>不变量</th><th class="num">已检查</th><th class="num">未覆盖</th><th class="num">覆盖率</th><th class="num">违规</th></tr></thead><tbody>'
+          + row('停牌日量额为 0', inv.suspended_zero_volume)
+          + row('preclose 与前收一致（除权日豁免）', inv.preclose_consistency)
+          + row('异常跳变能由公司行动解释', inv.unexplained_jumps)
+          + '</tbody></table></div>'
+          + (samples.length ? `<ul class="muted small">${samples.join('')}</ul>` : '')
+          + `<p class="muted small">可用时刻口径：${esc(report.available_at_basis || 'trade_date')}（按交易日收盘后推的保守近似，不是真实可获得时刻）</p>`;
+      })()
+      + `<details><summary>来源与缺口详情</summary><pre>${esc(JSON.stringify(report, null, 2))}</pre></details></section></div>`;
     $('close-coverage').onclick = () => { $('coverage-detail').innerHTML = ''; };
     $('coverage-detail').scrollIntoView?.({block: 'start', behavior: 'smooth'});
   })();

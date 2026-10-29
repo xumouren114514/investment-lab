@@ -79,3 +79,12 @@ def test_small_moves_are_checked_but_not_flagged():
     assert rep["unexplained_jumps"]["checked"] == 1
     assert rep["unexplained_jumps"]["violation_count"] == 0
     assert rep["unexplained_jumps"]["coverage"] == 1.0
+
+
+def test_coverage_panel_shows_invariants():
+    """C-141：接口返回了 invariants，面板必须真的显示——否则等于没做。"""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "src" / "investment_lab" / "web" / "static"
+          / "view-manage.js").read_text(encoding="utf-8")
+    assert "report.invariants" in js and "未覆盖 = 没数据可查" in js
+    assert "available_at_basis" in js
