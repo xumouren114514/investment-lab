@@ -12,9 +12,21 @@ $pythonExecutable = Join-Path $projectDirectory '.venv\Scripts\python.exe'
 
 function Invoke-Git {
     param([string[]]$GitArguments)
-    $output = & git -C $projectDirectory @GitArguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Git 命令失败：git $($GitArguments[0])。若已创建本地提交，脚本不会回滚它。"
+    # 2026-10-30（C-163 顺带）：原来在 $ErrorActionPreference='Stop' 下直接 `& git ...`，
+    # git 往 stderr 写的**正常**内容（push 进度、"Everything up-to-date"、CRLF warning）
+    # 会被 PowerShell 包成 NativeCommandError 抛出——异常在 $LASTEXITCODE 判断之前就发生了。
+    # 结果是**推送成功却报失败**（2026-10-30 连中两次，每次都要手工 git fetch 核对）。
+    # 这里把这一步的 EAP 降成 Continue，只用 $LASTEXITCODE 判成败。
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & git -C $projectDirectory @GitArguments 2>&1 | ForEach-Object { "$_" }
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ($exitCode -ne 0) {
+        throw "Git 命令失败（exit $exitCode）：git $($GitArguments[0])。若已创建本地提交，脚本不会回滚它。$($output -join ' ')"
     }
     return $output
 }
