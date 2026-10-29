@@ -19,11 +19,20 @@ from .reference import REFERENCE_MODE, REFERENCE_BASIS, REFERENCE_WARNING, refer
 STAR_BOARD_RULE_NOT_IMPLEMENTED = "科创板买入最低数量和增量规则待实现"
 
 
-def _preclose_for(symbol, bar, prices):
+def _preclose_for(symbol, bar, prices, ex_dividend_days=None, ex_split_days=None):
     """涨跌停的基准：bar 自带的 preclose，否则用引擎里上一有效收盘（含停牌延续）。
 
-    真实数据只有 BaoStock 归一化器写 preclose；Tushare/EODHD/Yahoo/CFFEX 都没有，
+    真实数据只有 BaoStock 归一化器写 preclose；东财/Yahoo/CFFEX 都没有，
     不能因此让守卫静默失效。
+
+    C-163（2026-10-30）：**除息日例外**。引擎记的「上一有效收盘」在分红除息日是**除息前**的价格
+    （`account.action` 只对 split 调 `prices`，分红只记应收款），按它算涨跌停会虚高：
+    除息 1 元 / 前收 10 元时，涨停算成 11.00 而真实是 9.90，一字涨停就被判「未触及」放行。
+    所以当日有非拆股公司行动、而 bar 与引擎都给不出可靠前收时，这里返回 None——
+    `_limit_verdict` 会判「算不出来」并计入 `limit_guard_skipped`：**宁可承认不知道，也不要静默算错**。
+
+    注意与拆股的区别（C-162 的教训）：拆股当天 `simulate` 会执行 `prices[symbol] /= ratio`，
+    `prices` 里已是**除权后**价格，那是可靠基准，不能一并判成算不出来。所以拆股日优先。
     """
     raw = bar.get("preclose")
     if raw not in (None, "", 0):
@@ -33,6 +42,13 @@ def _preclose_for(symbol, bar, prices):
                 return value
         except Exception:  # noqa: BLE001
             pass
+    day = bar.get("date")
+    # 拆股日：prices 已被引擎折算，照常用
+    if ex_split_days and day in ex_split_days:
+        return prices.get(symbol)
+    # 除息日（分红等非拆股行动）：prices 还是除息前的，不能当基准
+    if ex_dividend_days and day in ex_dividend_days:
+        return None
     return prices.get(symbol)
 
 
@@ -609,6 +625,19 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
     max_leverage = dec(config.max_leverage)
     state, next_id = {}, 1
     bankrupt = False
+    # C-163：拆股日与除息日分开准备。拆股日 `prices` 会被折算（可靠基准），
+    # 除息日不会——后者缺 preclose 时只能承认算不出来。
+    split_days = set()
+    ex_dividend_days = set()
+    for _day, _items in actions_by_day.items():
+        for _a in _items:
+            if _a.get("symbol") not in config.symbols:
+                continue
+            if _a.get("type") == "split":
+                split_days.add(_day)
+            else:
+                ex_dividend_days.add(_day)
+    ex_dividend_days -= split_days
     # 价限守卫是否真的算得出来（见 _limit_verdict）：必须是**整轮回测**的累计，
     # 不能放在日循环里——否则每天清零，metadata 只剩最后一天的值（2026-10-28 踩过）。
     limit_guard_applied = 0
@@ -662,7 +691,8 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
             else:
                 # 价限守卫是否真的算得出来，要能看见（见 _limit_verdict）
                 touched, guard_applied = _limit_verdict(
-                    order, sec, bar, _preclose_for(order.symbol, bar, prices))
+                    order, sec, bar,
+                    _preclose_for(order.symbol, bar, prices, ex_dividend_days, split_days))
                 if guard_applied:
                     limit_guard_applied += 1
                 else:
