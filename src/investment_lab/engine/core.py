@@ -13,7 +13,7 @@ from investment_lab.common import dec, digest, encoded, money
 from .account import Account, ZERO
 from .models import Config, Order
 from .cash_flows import MONTHLY_RULE, resolve_cash_flows
-from .price_limit import guard_report, limits_for_bar
+from .price_limit import guard_report, limits_for_bar, st_rule_report
 from .reference import REFERENCE_MODE, REFERENCE_BASIS, REFERENCE_WARNING, reference_available
 
 STAR_BOARD_RULE_NOT_IMPLEMENTED = "科创板买入最低数量和增量规则待实现"
@@ -60,6 +60,32 @@ def _limit_verdict(order, security: dict, bar: dict, preclose=None) -> tuple[boo
     if order.remaining > 0:
         return (bar.get("high") is not None and dec(bar["high"]) >= up), True
     return (bar.get("low") is not None and dec(bar["low"]) <= down), True
+
+
+_MAIN_BOARD_PREFIXES = ("600", "601", "603", "605", "000", "001", "002", "003")
+
+
+def _main_board_st_observable(security: dict, bar: dict) -> tuple[bool, bool]:
+    """C-161（修法 C）：这次尝试是否落在主板股票上，以及能否读到 ST 标记。
+
+    返回 (是否主板股票, 是否读得到 ST 标记)。只做统计，**不改变成交判定**。
+    与 `price_limit.limits_for_bar` 取值口径一致：security 优先，其次 bar。
+    """
+    sec = security or {}
+    if sec.get("kind") not in (None, "stock"):
+        return False, False
+    symbol = str(sec.get("symbol") or (bar or {}).get("symbol")
+                 or sec.get("code") or (bar or {}).get("code") or "")
+    code = ""
+    for chunk in symbol.replace("_", ".").split("."):
+        digits = chunk.strip()
+        if len(digits) == 6 and digits.isdigit():
+            code = digits
+            break
+    if not code.startswith(_MAIN_BOARD_PREFIXES):
+        return False, False
+    raw = sec["is_st"] if "is_st" in sec else (bar or {}).get("is_st")
+    return True, raw is not None and raw != ""
 
 
 def is_shanghai_star_stock(security, symbol):
@@ -587,6 +613,9 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
     # 不能放在日循环里——否则每天清零，metadata 只剩最后一天的值（2026-10-28 踩过）。
     limit_guard_applied = 0
     limit_guard_skipped = 0
+    # C-161（修法 C）：主板股票尝试次数 / 其中能读到 ST 标记的次数。同样必须是整轮累计。
+    st_board_checked = 0
+    st_flag_seen = 0
 
     for session_index, day in enumerate(sessions):
         if config.rules:
@@ -638,6 +667,12 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                     limit_guard_applied += 1
                 else:
                     limit_guard_skipped += 1
+                # C-161：同一次尝试顺手统计 ST 规则的可观测性（不改变下面任何判定）
+                _mb, _st_ok = _main_board_st_observable(sec, bar)
+                if _mb:
+                    st_board_checked += 1
+                    if _st_ok:
+                        st_flag_seen += 1
                 if touched:
                     failure = "触及价格限制，日线保守拒绝成交"
                 elif sec.get("kind") == "future" and day >= sec["expiry"] and order.remaining > 0:
@@ -878,6 +913,9 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
                          # C-142（§14 第 1 条）：两个数字不够——要一句话说清"这段成交有没有价限保护"
                          "price_limit_guard": guard_report(limit_guard_applied, limit_guard_skipped,
                                                            manifest.get("source")),
+                         # C-161（修法 C）：ST 5% 规则到底有没有数据支撑。东财来源的 bar 与
+                         # open_acquire 的 security 都没有 is_st，ST 股会被按 10% 判——这里让它可见。
+                         "st_rule_coverage": st_rule_report(st_board_checked, st_flag_seen),
                          "research_warning": (REFERENCE_WARNING if reference else
                                               ("以收盘价成交，不是真实可成交回测；仅供研究" if config.mode == "close_research" else None)),
                          "corporate_action_policy": "忽略拆股及现金分红；仅价格收益，不含股息" if reference else "事件分别记账",

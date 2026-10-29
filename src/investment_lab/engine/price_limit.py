@@ -100,6 +100,37 @@ def limits_for_bar(security: dict, bar: dict,
     return limits_for(symbol, base, st)
 
 
+def st_rule_report(main_board_checked, st_flag_seen):
+    """C-161（修法 C）：把「ST 5% 规则到底有没有数据支撑」变成一句能被读的话。
+
+    为什么需要：ST 判定要读 `is_st`，但**东财来源的 bar 与 open_acquire 构造的 security
+    都没有这个字段**（只有 BaoStock 的 bar 有）。于是东财数据上的主板 ST 股按 10% 判涨跌停，
+    而真实规则是 5%——保护静默失效。这不改变任何计算（口径修复另案评审），
+    只是让"这条规则在这些数据上算不出来"**可见**。
+
+    判决来自实际发生的尝试，不看数据源的自我声明：
+      · not_used —— 本次没有主板股票尝试，谈不上这条规则；
+      · verified —— 每次主板尝试都能读到 ST 标记（能区分 ST / 非 ST）；
+      · partial  —— 一部分能读到、一部分读不到（混合来源），**不能给整批背书**；
+      · unknown  —— 一次都没读到 ST 标记：ST 判定形同虚设。
+    """
+    checked, seen = int(main_board_checked or 0), int(st_flag_seen or 0)
+    checked, seen = max(checked, 0), max(seen, 0)
+    if checked == 0:
+        status, note = "not_used", "本次没有主板股票成交尝试，谈不上 ST 涨跌停规则"
+    elif seen == 0:
+        status, note = "unknown", (
+            "数据里没有 ST 标记：主板 ST 股按 10% 判涨跌停，而真实规则是 5%，"
+            "这些成交的价限保护偏松（C-161）")
+    elif seen < checked:
+        status, note = "partial", (
+            f"{seen}/{checked} 次主板尝试能读到 ST 标记，其余读不到——"
+            "ST 规则只对一部分成交生效（C-161）")
+    else:
+        status, note = "verified", "每次主板尝试都能读到 ST 标记，ST 5% 规则有数据支撑"
+    return {"status": status, "main_board_checked": checked, "st_flag_seen": seen, "note": note}
+
+
 def guard_report(applied, skipped, source=None):
     """C-142（§14 第 1 条）：把「价限守卫有没有真的生效」变成一句能被读的话。
 
