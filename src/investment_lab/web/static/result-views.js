@@ -96,6 +96,32 @@
     return warning + `<details class="strategy-diagnostics"><summary>策略诊断明细（${items.length}项）</summary><div class="table-wrap"><table><thead><tr><th>日期</th><th>策略</th><th>标的</th><th>处理方式</th><th>原因</th></tr></thead><tbody>${items.map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.strategy)}</td><td>${esc(item.symbol)}</td><td>${esc(DIAGNOSTIC_ACTIONS[item.action] ?? item.action ?? '')}</td><td>${esc(item.message ?? item.reason ?? item.code ?? '')}</td></tr>`).join('')}</tbody></table></div></details>`;
   }
 
+  /* C-142/C-145/C-146：这次结果"能不能信"的四个字段。
+     价限守卫判决、公司行动门禁、预热携转比例、成交价口径——原来只在 result.json 里，页面上一片空白。 */
+  function trustBlock(metadata = {}) {
+    const guard = metadata?.price_limit_guard;
+    const gate = metadata?.corporate_action_gate;
+    const warm = metadata?.warmup_flat_summary;
+    const basis = metadata?.execution_price_basis;
+    const unadjusted = Array.isArray(metadata?.unadjusted_symbols) ? metadata.unadjusted_symbols : [];
+    if (!guard && !gate && !warm && !basis) return '';
+    const rows = [];
+    if (basis) rows.push(`<li>成交价口径：<strong>${esc(basis)}</strong>${basis === 'vwap' ? '' : '（不是真实可成交口径）'}</li>`);
+    if (guard) {
+      const tone = guard.status === 'applied' ? 'gain' : (guard.status === 'unavailable' ? 'loss' : '');
+      rows.push(`<li>价限守卫：<strong class="${tone}">${esc(guard.status)}</strong>` +
+        `${guard.source ? `，数据源 ${esc(guard.source)}` : ''}` +
+        `${guard.applied + guard.skipped ? `（算得出 ${esc(guard.applied)} / 算不出 ${esc(guard.skipped)} 次）` : ''}` +
+        `${guard.note ? `<div class="help">${esc(guard.note)}</div>` : ''}</li>`);
+    }
+    if (gate) {
+      rows.push(`<li>公司行动门禁：<strong>${esc(gate)}</strong>` +
+        `${unadjusted.length ? `；未核实标的：${esc(unadjusted.join('、'))}` : ''}</li>`);
+    }
+    if (warm) rows.push(`<li>预热携转 bar：${esc(warm)}<div class="help">只统计、不参与计算</div></li>`);
+    return `<div class="callout" role="status"><strong>这次结果的可信度</strong><ul>${rows.join('')}</ul></div>`;
+  }
+
   function cashFlowPlan(metadata) {
     const plan = metadata?.cash_flows;
     if (!plan || !Object.keys(plan).length) return '';
@@ -243,7 +269,7 @@
   }
 
   const api = {MODE_NAMES, KIND_NAMES, STATUS_NAMES, REFERENCE_NOTE, DIAGNOSTIC_ACTIONS, COLUMN_LABELS, TABLE_COLUMNS, CURVE_SERIES,
-    statusBadge, dataBadge, metric, metrics, compactMetrics, diagnostics, cashFlowPlan, dataSources, table, rollingHeatmap,
+    statusBadge, dataBadge, metric, metrics, compactMetrics, trustBlock, diagnostics, cashFlowPlan, dataSources, table, rollingHeatmap,
     holdoutSummary, curveValues, cellValue, curveChart, comparison, CSV_LEADING, csvColumns};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.InvestmentLabResults = api;

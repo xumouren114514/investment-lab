@@ -39,3 +39,16 @@ def test_metadata_exposes_guard_report(small, config):
     assert guard["applied"] == result["metadata"]["limit_guard_applied"]
     assert guard["skipped"] == result["metadata"]["limit_guard_skipped"]
     assert guard["source"] == "synthetic", guard
+
+
+def test_result_view_renders_trust_block():
+    """C-142/C-145/C-146：metadata 里的判决必须显示出来，否则等于没做。"""
+    from pathlib import Path as _P
+    static = _P(__file__).resolve().parents[1] / "src" / "investment_lab" / "web" / "static"
+    views = (static / "result-views.js").read_text(encoding="utf-8")
+    runs = (static / "view-runs.js").read_text(encoding="utf-8")
+    assert "function trustBlock(" in views, "结果视图里没有 trustBlock"
+    assert "trustBlock," in views, "trustBlock 没有导出"
+    assert "Results.trustBlock(metadata)" in runs, "运行结果页没有调用 trustBlock"
+    for field in ("price_limit_guard", "corporate_action_gate", "warmup_flat_summary", "unadjusted_symbols"):
+        assert field in views, field

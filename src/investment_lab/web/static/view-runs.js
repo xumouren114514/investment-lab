@@ -215,6 +215,7 @@ function completedDetail(id, d) {
   return experiment + `<div class="report"><section class="report-section">${sectionLabel}`
     + (metadata.reference_only ? `<p class="callout demo">${esc(metadata.research_warning)}</p>` : '')
     + (request.synthetic ? '<p class="callout demo">合成演示数据，不构成投资结论。</p>' : '')
+    + Results.trustBlock(metadata)
     + Results.diagnostics(metadata)
     + Results.metrics(r.metrics, {currency: metadata.currency})
     + `<div class="chart-toolbar"><div class="segmented" role="group" aria-label="选择曲线">${seriesButtons}</div>`
