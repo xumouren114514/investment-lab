@@ -496,7 +496,7 @@ def _preflight(manifest, bars, config):
     return sessions
 
 
-def _warmup_report(bars, symbols, first_session):
+def _warmup_report(bars, symbols, first_session, warmup):
     """C-146（§14 第 2 条）：预热窗口里有多少"携转假 bar"。
 
     携转 = 当天停牌、价格抄前一天（或零成交且收盘与前一根相同）。这类 bar 会让 MA/波动率/动量
@@ -506,6 +506,8 @@ def _warmup_report(bars, symbols, first_session):
     out = {}
     for symbol in symbols:
         warm = list(bars.symbol(symbol).before(first_session))
+        # C-146 修正：只数**策略实际用到的**预热深度（config.warmup），不是窗口之前的全部历史
+        warm = warm[-int(warmup):] if int(warmup) > 0 else []
         flat = 0
         prev_close = None
         for bar in warm:
@@ -527,7 +529,7 @@ def simulate(manifest, bars, config: Config, strategy, params=None, progress=Non
     reference = config.mode == REFERENCE_MODE
     securities = manifest["securities"]
     # C-146：预热窗口的携转假 bar 只统计、不参与计算（见 _warmup_report 的说明）
-    warmup_bars = _warmup_report(bars, config.symbols, sessions[0]) if sessions else {}
+    warmup_bars = _warmup_report(bars, config.symbols, sessions[0], config.warmup) if sessions else {}
     symbol_bars = {s: bars.symbol(s) for s in config.symbols}
     account = Account(config.initial_cash)
     pending, trades, orders, curve, notes = [], [], [], [], []

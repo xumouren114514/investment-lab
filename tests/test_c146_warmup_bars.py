@@ -59,3 +59,16 @@ def test_warmup_counting_does_not_change_metrics(small, config):
     assert flat_result["metrics"] == live_result["metrics"], "预热段的携转与否不能改变任何指标"
     assert flat_result["metadata"]["warmup_bars"]["A"]["flat"] == 2
     assert live_result["metadata"]["warmup_bars"]["A"]["flat"] == 0
+
+def test_only_the_configured_warmup_depth_is_counted(small, config):
+    """C-146 修正：窗口之前有 3 根、但 warmup=2 时只数 2 根——策略看不到的那根不该算进分母。"""
+    from dataclasses import replace
+
+    payload = base(small)
+    payload["sessions"] = ["2023-12-27"] + payload["sessions"]
+    payload["bars"] = [{**payload["bars"][0], "date": "2023-12-27"}] + payload["bars"]
+    cfg = replace(config, start=payload["sessions"][3], warmup=2)
+    result = simulate({k: v for k, v in payload.items() if k != "bars"}, payload["bars"], cfg,
+                      SimpleNamespace(on_session=lambda ctx: None))
+    info = result["metadata"]["warmup_bars"]["A"]
+    assert info["bars"] == 2, info
