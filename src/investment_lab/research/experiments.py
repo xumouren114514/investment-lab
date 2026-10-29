@@ -54,6 +54,52 @@ def benchmark_result(manifest, bars, config, progress=None):
     return result
 
 
+def _trust_summary(samples) -> dict:
+    """C-159：把各窗口的「可信度」字段汇总到滚动结果的顶层 metadata。
+
+    每个完成的窗口都带 `price_limit_guard` 等字段；汇总层不给的话，结果页的可信度块就是空的。
+    汇总口径说明白：守卫取"所有窗口的最差状态"，携转比例按窗口合计，门禁各窗口应一致。
+    """
+    from collections import Counter
+
+    guards, gates, flat, bars_total = [], [], 0, 0
+    for sample in samples:
+        if sample.get("status") != "completed":
+            continue
+        meta = (sample.get("result") or {}).get("metadata") or {}
+        guard = meta.get("price_limit_guard")
+        if guard:
+            guards.append(guard)
+        gate = meta.get("corporate_action_gate")
+        if gate:
+            gates.append(gate)
+        for item in (meta.get("warmup_bars") or {}).values():
+            flat += int(item.get("flat") or 0)
+            bars_total += int(item.get("bars") or 0)
+    out = {}
+    if guards:
+        counts = Counter(g["status"] for g in guards)
+        if counts.get("unavailable") == len(guards):
+            status = "unavailable"
+        elif counts.get("applied") == len(guards):
+            status = "applied"
+        else:
+            status = "partial"
+        sources = sorted({g.get("source") for g in guards if g.get("source")})
+        out["price_limit_guard"] = {
+            "status": status, "windows": dict(counts),
+            "applied": sum(int(g.get("applied") or 0) for g in guards),
+            "skipped": sum(int(g.get("skipped") or 0) for g in guards),
+            "source": sources[0] if len(sources) == 1 else "mixed",
+            "note": f"{len(guards)} 个窗口汇总；明细见各窗口结果"}
+    if gates:
+        out["corporate_action_gate"] = gates[0] if len(set(gates)) == 1 else "mixed"
+    if bars_total:
+        out["warmup_flat_summary"] = (f"{len(guards)} 个窗口合计 携转 {flat}/{bars_total}"
+                                      f"（{flat / bars_total:.1%}）")
+    return out
+
+
 def rolling(manifest, bars, config, factory, params, interval="month", horizon=60, end_mode="fixed_length", progress=None):
     if interval not in ("day", "month", "quarter", "year") or end_mode not in ("fixed_length", "common_end") or horizon < 2:
         raise ValueError("滚动参数无效")
@@ -129,7 +175,7 @@ def rolling(manifest, bars, config, factory, params, interval="month", horizon=6
             "median_drawdown": float(np.median(drawdowns)) if drawdowns else None,
             # C-120：SPEC 要求的“相对基准表现”在滚动里也要能看到（基准与各窗口同资金流）
             "relative_median": float(np.median(relatives)) if relatives else None},
-            "metadata": {**research_metadata(config), "interval": interval,
+            "metadata": {**research_metadata(config), **_trust_summary(samples), "interval": interval,
                          # C-110：common_end 时窗口长度不等，horizon 并不生效，不能谎报成固定 horizon
                          "horizon_sessions": horizon if end_mode == "fixed_length" else None,
                          "end_mode": end_mode,
