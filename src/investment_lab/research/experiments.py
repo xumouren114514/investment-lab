@@ -218,5 +218,7 @@ def holdout(manifest, bars, config, factory, params, test_start, gap_sessions=0,
         outputs[label] = {"start": start, "end": end, "result": result, "benchmark": benchmark}
         if progress:
             progress(completed_work, total_work)
-    return {"kind": "holdout", **outputs, "metadata": {**research_metadata(config), "test_start": test_start, "gap_sessions": gap_sessions,
+    trust = _trust_summary([{"status": "completed", "result": item["result"]} for item in outputs.values()])
+    return {"kind": "holdout", **outputs,
+            "metadata": {**research_metadata(config), **trust, "test_start": test_start, "gap_sessions": gap_sessions,
             "initialization": "独立空仓账户与策略状态，仅允许历史预热", "parameter_selection": "无自动参数搜索；冻结代码和参数后运行"}}
