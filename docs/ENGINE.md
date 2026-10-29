@@ -69,3 +69,25 @@ VWAP 是全日模拟基准，加入方向性滑点，不保证真实订单可成
 外部现金流视为当天交易前入账；日收益为 E_t / (E_prev + Flow_t) − 1，链乘得到时间加权收益和回撤。净利润 = 末权益 − 初始本金 − 净入金。资金加权收益仅一年以上报告 XIRR，未找到单一根区间返回缺失。年化收益不足一年返回缺失；波动率和零无风险利率 Sharpe 用 252 交易日，Sharpe 至少 20 个观察值。胜率：股票按每次卖出成交计；期货按平仓/交割的完整往返计（含开仓与平仓费用，到期现金交割也会记录）。换手为绝对成交额/平均权益。
 
 固定池存在事后选股偏差。滚动窗口重叠并不独立，不输出虚假的显著性。留出测试在本系统内首次/重复使用有记录；不声称外部从未看过数据。算法没有自动参数搜索或 walk-forward，不能把普通滚动起点误称样本外验证。
+
+## 结果的 metadata（Engine 6）
+
+回测结果 `result.json` 的 `metadata` 不是备注，而是**判断这次结果能不能信**的依据。关键字段：
+
+| 字段 | 含义 | 怎么用 |
+|---|---|---|
+| `price_model` / `execution_price_basis` | 成交价口径（`vwap` / `close` / `reference_adjusted_close`） | 只有 `vwap` 是真实可成交口径，其余是研究模式 |
+| `limit_guard_applied` / `limit_guard_skipped` | 价限守卫在「订单-交易日尝试」上算得出 / 算不出的次数 | 两个数要放在一起看 |
+| `price_limit_guard` | 一句话判决：`applied` / `partial` / `unavailable` / `not_used`，带 `source` 与说明 | `unavailable` 表示这段成交**没有价限保护** |
+| `corporate_action_gate` | `fail_closed`（交易回测）/ `explicit_assumption`（用户显式允许未核实）/ `research_mode` | 配合 `unadjusted_symbols` 看哪些标的没核实 |
+| `unadjusted_symbols` | 本次所选标的中，公司行动未核实的那些 | 研究模式必须呈现 |
+| `warmup_bars` / `warmup_flat_summary` | 预热窗口里「停牌抄昨收 / 零成交且收盘不变」的 bar 数 | 预热段假观测比例；**只统计、不参与任何计算** |
+| `synthetic` | 是否合成演示数据 | 真实与合成严格隔离 |
+| `notes` / `strategy_diagnostics` | 策略诊断与汇总提示 | 有订单失败先看这里 |
+
+数据侧还有两处要看：
+
+- manifest 的 `available_at_basis = trade_date`：可用时刻是**按交易日收盘后推的保守近似**，不是真实可获得时刻（没有那种数据源，不假装精确）。
+- `GET /api/coverage/{snapshot}` 的 `invariants`：停牌日量额、preclose 一致性、异常跳变三条不变量，每条给出
+  `checked` / `uncovered` / `coverage` / `violations`。**`uncovered` 是「没数据可查」，不是「查过没问题」**——
+  这两件事混在一起，就等于给没检查过的数据发合格证。
