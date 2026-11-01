@@ -289,8 +289,16 @@ class JobManager:
                 ps = psutil.Process(process.pid)
                 rss = sum(p.memory_info().rss for p in [ps, *ps.children(recursive=True)] if p.is_running())
                 if time.monotonic() - began > timeout or rss > memory_mb * 1024 * 1024:
-                    self.cancel(run_id, "资源/时间限制")
-                    return
+                    # C-168：cancel() 现在先取锁；取不到会抛 RuntimeError。
+                    # **不能让这个线程死掉**——死了之后这个 run 就再没有超时/内存保护了。
+                    # 记录一次，等下一轮（锁通常几秒内释放）；连续失败才放弃并记下原因。
+                    try:
+                        self.cancel(run_id, "资源/时间限制")
+                        return
+                    except RuntimeError as e:
+                        self._watch_error(run_id, f"取消失败（锁被占用），稍后重试：{e}")
+                        time.sleep(.5)
+                        continue
             except psutil.Error:
                 pass
             time.sleep(.5)
@@ -299,35 +307,68 @@ class JobManager:
             if row and row[0] in ("queued", "running"):
                 cx.execute("UPDATE runs SET status='failed',summary=? WHERE id=?", (encoded({"message": "工作进程异常退出", "exit_code": process.returncode}).decode(), run_id))
 
+    def _watch_error(self, run_id, message):
+        """记录监控线程遇到的问题（C-168）。
+
+        `_watch` 是 daemon 线程：它一旦抛未捕获异常就**静默消失**，
+        而那个 run 之后再也没有超时/内存保护——而且没人会知道。
+        这里把问题写进 run 目录的 `watch_error.json`（原子写），
+        并在 run 详情里可见。
+        """
+        try:
+            atomic_write(self.store.root / "runs" / run_id / "watch_error.json",
+                         {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "message": message})
+        except Exception:  # noqa: BLE001  记录失败绝不能反过来把线程弄死
+            pass
+
     def cancel(self, run_id, reason="用户取消"):
+        """C-168（2026-11-02）：**先取锁，再杀进程**。
+
+        原来的顺序是「先 kill、后 with self.store.lock() 写状态」。锁被占用时
+        `file_lock` 抛 `RuntimeError("另一个写入/备份任务仍持有锁")`，于是：
+
+        - 子进程**已经被杀了**——回测被强行终止；
+        - 数据库里 run **仍是 running**——界面上看不到它结束；
+        - `_watch` 线程**直接死掉**（异常没被捕获）——这个 run 从此没有任何监控。
+
+        2026-11-01 23:5x 跑 `verify_delivery.py` 时 stderr 里就冒出过这个 RuntimeError，
+        而脚本退出码还是 0。
+
+        现在：**取不到锁就什么都不做**——子进程留着，状态不动，把异常抛给调用方；
+        调用方（`_watch` / HTTP 接口）自己决定重试或报告。宁可"这次没取消成功"，
+        也不能出现"进程死了但没人知道"。
+        """
         import psutil
-        process = self.active.get(run_id)
-        if process is not None and process.poll() is None:
-            try:
-                parent = psutil.Process(process.pid)
-                for child in parent.children(recursive=True):
-                    child.kill()
-                parent.kill()
-            except psutil.NoSuchProcess:
-                pass
-            try:
-                process.wait(timeout=10)
-            except Exception:  # noqa: BLE001
-                pass
-        else:
-            # C-121：服务重启后 active 为空；若 pid 还活着（CLI worker）就杀掉，否则直接标记。
-            # 已完成/失败的记录不会被覆盖。
-            run_dir = within(self.store.root / "runs", run_id)
-            pid = _run_pid(run_dir)
-            if isinstance(pid, int) and pid > 0:
+        # ① 先拿锁：拿不到直接抛，**此时还没有杀任何进程**
+        with self.store.lock(), self.store.connect() as cx:
+            # ② 锁在手里之后才杀进程
+            process = self.active.get(run_id)
+            if process is not None and process.poll() is None:
                 try:
-                    parent = psutil.Process(pid)
+                    parent = psutil.Process(process.pid)
                     for child in parent.children(recursive=True):
                         child.kill()
                     parent.kill()
-                except psutil.Error:
+                except psutil.NoSuchProcess:
                     pass
-        with self.store.lock(), self.store.connect() as cx:
+                try:
+                    process.wait(timeout=10)
+                except Exception:  # noqa: BLE001
+                    pass
+            else:
+                # C-121：服务重启后 active 为空；若 pid 还活着（CLI worker）就杀掉，否则直接标记。
+                # 已完成/失败的记录不会被覆盖。
+                run_dir = within(self.store.root / "runs", run_id)
+                pid = _run_pid(run_dir)
+                if isinstance(pid, int) and pid > 0:
+                    try:
+                        parent = psutil.Process(pid)
+                        for child in parent.children(recursive=True):
+                            child.kill()
+                        parent.kill()
+                    except psutil.Error:
+                        pass
+            # ③ 最后写状态（锁已在手，不会再被别处挡住）
             cur = cx.execute("UPDATE runs SET status='cancelled',summary=? WHERE id=? AND status IN ('queued','running')",
                              (encoded({"message": reason}).decode(), run_id))
             if cur.rowcount == 0:
