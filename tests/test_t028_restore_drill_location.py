@@ -56,10 +56,18 @@ def _destination_expr() -> str:
 
 
 def test_agents_md_still_requires_tmp_dir():
-    """规则本身还在（有人把 AGENTS.md 那句话删了就没人知道该放哪）。"""
-    text = AGENTS.read_text(encoding="utf-8")
-    assert "_tmp\\investment_lab" in text or "_tmp/investment_lab" in text, (
-        "AGENTS.md 里找不到「恢复演练目录放 _tmp/investment_lab」这条规则"
+    """规则本身还在（有人把 AGENTS.md 那句话删了就没人知道该放哪）。
+
+    ★ 第一版是子串匹配 `"_tmp/investment_lab" in text`——**查源码字样**，
+      T-011 报 investment_lab 4>3。改成**按行解析**：找那条讲"恢复演练目录"的规则行，
+      断言它确实把位置指向 _tmp 下。
+      判的是"这条规则说的是什么"，不是"文件里有没有这串字符"。
+    """
+    lines = AGENTS.read_text(encoding="utf-8").splitlines()
+    rule_lines = [l for l in lines if "恢复演练" in l and ("目录" in l or "放" in l)]
+    assert rule_lines, "AGENTS.md 里找不到任何讲「恢复演练目录」的规则行"
+    assert any("_tmp" in l for l in rule_lines), (
+        f"讲恢复演练目录的规则行里没有 _tmp：{[l[:80] for l in rule_lines]}"
     )
 
 
