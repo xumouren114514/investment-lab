@@ -11,10 +11,14 @@ class Config:
     symbols: list[str]
     initial_cash: str = "100000"
     mode: str = "strict_vwap"
-    commission_bps: str = "3"
-    minimum_commission: str = "0"
-    sell_tax_bps: str = "0"
-    slippage_bps: str = "5"
+    # T-036（2026-11-02，守则 §九「金融口径不能靠猜」）：
+    # 以下四个是**研究假设的默认值，未经真实费率核对**。写清这一点比写一个
+    # 看起来精确却不知道来源的数字安全——按 §九「能算的算，不能算的标未验证」。
+    # 真实运行时用 config/rules 按 market / symbol / 日期覆盖，默认值只用于演示与测试。
+    commission_bps: str = "3"          # 万分之三；假设值，未对券商实盘核对
+    minimum_commission: str = "0"      # 不考虑最低佣金（如 A 股常见 5 元）；小额单成本会被低估
+    sell_tax_bps: str = "0"            # 假设卖出不交税；A 股实际单边 0.05%，含卖出的回测收益会被高估
+    slippage_bps: str = "5"            # 万分之五方向性滑点；假设值，未对真实成交分布校准
     max_participation: str = "0.01"
     max_leverage: str = "1"
     annual_interest: str = "0.06"
