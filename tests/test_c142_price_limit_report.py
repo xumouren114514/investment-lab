@@ -40,9 +40,14 @@ def test_metadata_exposes_guard_report(small, config):
     #   而**这四个值恰好是 guard_report() 能返回的全部取值** —— 同义反复，永远不会红。
     #   这个 fixture 的成交根本不触碰涨跌停（applied=0 / skipped=0），正确答案只有一个：not_used。
     assert guard["status"] == "not_used", guard
-    # 再交叉验一次：metadata 的 status 必须与「用它自己那两个计数重新算」一致
-    # （防止 metadata 里的 status 被写死、而计数是另一套）。
-    assert guard_report(guard["applied"], guard["skipped"])["status"] == guard["status"], guard
+    # ★ 2026-11-05 独立审查拆穿：这里我原先还写了一句"用 metadata 自己的计数重算一遍比对"，
+    #   看着像交叉校验，其实是**恒等式** —— core.py 的 metadata 本来就是
+    #   `guard_report(applied, skipped)` 生成的，而上面那句已经钉死 status=="not_used"
+    #   （等价于 applied+skipped==0），于是它退化成 `guard_report(0,0)=="not_used"`，
+    #   而这一点 test_four_statuses 早就覆盖了。
+    #   真要有独立价值，得用**碰过涨跌停的 fixture**（applied>0 或 skipped>0）来验；
+    #   那需要造场景，属于另一件事。这里宁可删掉，也不留一条看起来更严格、实际不增加覆盖的断言。
+    assert guard["applied"] + guard["skipped"] == 0, ("not_used 应当没有任何订单-交易日尝试", guard)
     assert guard["applied"] == result["metadata"]["limit_guard_applied"]
     assert guard["skipped"] == result["metadata"]["limit_guard_skipped"]
     assert guard["source"] == "synthetic", guard
