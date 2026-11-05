@@ -53,6 +53,55 @@ def test_metadata_exposes_guard_report(small, config):
     assert guard["source"] == "synthetic", guard
 
 
+class _BuyOnce:
+    """第一天买一次，第二天成交 —— 没有成交就没有"订单-交易日尝试"，guard 永远是 not_used。"""
+
+    def __init__(self):
+        self.n = 0
+
+    def on_session(self, ctx):
+        self.n += 1
+        if self.n == 1:
+            ctx.order_shares("A", 10, "测试：第一天买入")
+
+
+def _run_with_a_fill(small, config, *, computable: bool):
+    from copy import deepcopy
+
+    from investment_lab.engine.core import simulate
+
+    payload = deepcopy(small)
+    if computable:
+        # limit_ratio 是给"符号不是 6 位代码"的合成数据用的入口；preclose 是算涨跌停的基准。
+        payload["securities"]["A"]["limit_ratio"] = "0.1"
+        for b in payload["bars"]:
+            b["preclose"] = b["close"]
+    manifest = {k: v for k, v in payload.items() if k != "bars"}
+    return simulate(manifest, payload["bars"], config, _BuyOnce())
+
+
+def test_metadata_wiring_with_a_real_fill_is_applied(small, config):
+    """真有成交、且涨跌停算得出来 ⇒ metadata 里必须是 applied（不是 not_used）。
+
+    ★ 2026-11-05 第二次独立审查指出：原来这个文件只测过 `not_used`（`small` 根本不交易），
+      所以"接线接反了 / status 写死了"都测不出来。这条补上。
+    """
+    meta = _run_with_a_fill(small, config, computable=True)["metadata"]
+    guard = meta["price_limit_guard"]
+    print(f"（信息）applied={meta.get('limit_guard_applied')} skipped={meta.get('limit_guard_skipped')} status={guard['status']}")
+    assert meta.get("limit_guard_applied", 0) >= 1, ("这一期应当至少有一次价限判定", meta.get("limit_guard_applied"))
+    assert guard["status"] == "applied", guard
+
+
+def test_metadata_wiring_without_a_computable_limit_is_unavailable(small, config):
+    """有成交但算不出涨跌停（缺 preclose / 无 limit_ratio）⇒ 必须是 unavailable，不许假装有守卫。"""
+    meta = _run_with_a_fill(small, config, computable=False)["metadata"]
+    guard = meta["price_limit_guard"]
+    print(f"（信息）applied={meta.get('limit_guard_applied')} skipped={meta.get('limit_guard_skipped')} status={guard['status']}")
+    assert meta.get("limit_guard_skipped", 0) >= 1, ("这一期应当至少有一次算不出价限", meta.get("limit_guard_skipped"))
+    assert guard["status"] == "unavailable", guard
+
+
 def test_result_view_renders_trust_block():
     """C-142/C-145/C-146：metadata 里的判决必须显示出来，否则等于没做。"""
     from pathlib import Path as _P
