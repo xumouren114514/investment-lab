@@ -35,7 +35,14 @@ def test_metadata_exposes_guard_report(small, config):
     manifest = {k: v for k, v in small.items() if k != "bars"}
     result = simulate(manifest, small["bars"], config, SimpleNamespace(on_session=lambda ctx: None))
     guard = result["metadata"]["price_limit_guard"]
-    assert guard["status"] in ("not_used", "unavailable", "partial", "applied")
+    # ★ 2026-11-05 补强（弱断言扫描的独立甄别）：原来这里是
+    #   `assert guard["status"] in ("not_used", "unavailable", "partial", "applied")`，
+    #   而**这四个值恰好是 guard_report() 能返回的全部取值** —— 同义反复，永远不会红。
+    #   这个 fixture 的成交根本不触碰涨跌停（applied=0 / skipped=0），正确答案只有一个：not_used。
+    assert guard["status"] == "not_used", guard
+    # 再交叉验一次：metadata 的 status 必须与「用它自己那两个计数重新算」一致
+    # （防止 metadata 里的 status 被写死、而计数是另一套）。
+    assert guard_report(guard["applied"], guard["skipped"])["status"] == guard["status"], guard
     assert guard["applied"] == result["metadata"]["limit_guard_applied"]
     assert guard["skipped"] == result["metadata"]["limit_guard_skipped"]
     assert guard["source"] == "synthetic", guard
